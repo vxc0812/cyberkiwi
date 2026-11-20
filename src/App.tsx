@@ -23,6 +23,15 @@ import { emptyStateFor } from './services/emptyState';
 
 /** Stories requested per page from the CyberKiwi server (the server caps this at 50). */
 const STORY_PAGE_SIZE = 50;
+
+interface BlockStoryPage {
+  reader: string;
+  queryKey: string;
+  stories: NewsStory[];
+  nextCursor: string | null;
+  expanded: boolean;
+}
+
 import { getAccent } from './utils/theme';
 import { Bookmark, Sparkles, Plus, Radio, Layers, RefreshCw, Archive, Trash2, CheckCircle2 } from 'lucide-react';
 import { fetchRssFeeds, isNativePlatform, summarizeBlockWithAi } from './services/apiAdapter';
@@ -157,10 +166,9 @@ export default function App() {
   const readerKeyRef = useRef<string | null>(currentReaderKey);
   readerKeyRef.current = currentReaderKey;
   const [serverStories, setServerStories] = useState<NewsStory[] | null>(null);
-  const [storiesCursor, setStoriesCursor] = useState<string | null>(null);
-  const [storiesHasMore, setStoriesHasMore] = useState<boolean>(false);
   const [apiStatus, setApiStatus] = useState<{ state: 'idle' | 'loading' | 'ok' | 'error'; code?: string }>({ state: 'idle' });
-  const [blockStories, setBlockStories] = useState<Record<string, NewsStory[]>>({});
+  const [blockStories, setBlockStories] = useState<Record<string, BlockStoryPage>>({});
+  const [loadingMoreBlockId, setLoadingMoreBlockId] = useState<string | null>(null);
   const blockRequestGenRef = useRef<number>(0);
   const [sourceHealth, setSourceHealth] = useState<FeedHealthItem[] | null>(null);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -434,8 +442,14 @@ export default function App() {
     const results = await Promise.all(
       blocks.map(async (block) => {
         try {
-          const page = await apiClient.listStories(storyQueryForBlock(block));
-          return { id: block.id, stories: page.items.filter((s) => s.articles.length > 0).map(storyToNewsStory) };
+          const query = storyQueryForBlock(block);
+          const page = await apiClient.listStories(query);
+          return {
+            id: block.id,
+            queryKey: JSON.stringify(query),
+            stories: page.items.filter((story) => story.articles.length > 0).map(storyToNewsStory),
+            nextCursor: page.hasMore ? page.nextCursor : null,
+          };
         } catch (err) {
           failures.push(err instanceof CyberkiwiApiError ? err.code : 'unknown');
           return null; // keep this block's last good results
@@ -447,9 +461,25 @@ export default function App() {
 
     const liveIds = new Set(blocks.map((b) => b.id));
     setBlockStories((prev) => {
-      const next: Record<string, NewsStory[]> = {};
-      for (const id of Object.keys(prev)) if (liveIds.has(id)) next[id] = prev[id];
-      for (const r of results) if (r) next[r.id] = r.stories;
+      const next: Record<string, BlockStoryPage> = {};
+      for (const [id, page] of Object.entries(prev)) {
+        if (liveIds.has(id) && page.reader === currentReaderKey) next[id] = page;
+      }
+      for (const result of results) {
+        if (!result) continue;
+        const prior = next[result.id];
+        const expanded = prior?.queryKey === result.queryKey && prior.expanded;
+        const firstPageIds = new Set(result.stories.map((story) => story.clusterId));
+        next[result.id] = {
+          reader: currentReaderKey,
+          queryKey: result.queryKey,
+          stories: expanded
+            ? [...result.stories, ...prior.stories.filter((story) => !firstPageIds.has(story.clusterId))]
+            : result.stories,
+          nextCursor: expanded ? prior.nextCursor : result.nextCursor,
+          expanded,
+        };
+      }
       return next;
     });
     if (failures.length > 0) {
@@ -487,8 +517,6 @@ export default function App() {
       if (readerKeyRef.current !== key) return; // signed out or another user signed in meanwhile
       const stories = page.items.filter((s) => s.articles.length > 0).map(storyToNewsStory);
       setServerStories(stories);
-      setStoriesCursor(page.nextCursor);
-      setStoriesHasMore(page.hasMore);
       applyIncomingItems(stories.flatMap((s) => s.articles));
       setLastUpdated(new Date());
       setApiStatus({ state: 'ok' });
@@ -508,22 +536,42 @@ export default function App() {
     // This callback is recreated whenever the reader changes, so it never runs with another reader's key.
   }, [apiClient, applyIncomingItems, addToast, currentReaderKey]);
 
-  const loadMoreStories = useCallback(async () => {
-    if (!apiClient || currentReaderKey === null || !storiesHasMore || !storiesCursor) return;
-    const key = currentReaderKey;
+  const loadMoreBlockStories = async (block: DynamicBlock) => {
+    const current = blockStories[block.id];
+    const query = storyQueryForBlock(block);
+    if (!apiClient || !current?.nextCursor || loadingMoreBlockId !== null
+      || current.reader !== currentReaderKey || current.queryKey !== JSON.stringify(query)) return;
+
+    setLoadingMoreBlockId(block.id);
     try {
-      const page = await apiClient.listStories({ limit: STORY_PAGE_SIZE, cursor: storiesCursor });
-      if (readerKeyRef.current !== key) return;
-      const more = page.items.filter((s) => s.articles.length > 0).map(storyToNewsStory);
-      setServerStories((prev) => [...(prev ?? []), ...more]);
-      setStoriesCursor(page.nextCursor);
-      setStoriesHasMore(page.hasMore);
-      setAllNewsItems((prev) => mergeArticles(prev, more.flatMap((s) => s.articles)));
+      const page = await apiClient.listStories({ ...query, cursor: current.nextCursor });
+      if (readerKeyRef.current !== current.reader) return;
+      const stories = page.items.filter((story) => story.articles.length > 0).map(storyToNewsStory);
+      setBlockStories((prev) => {
+        const latest = prev[block.id];
+        if (!latest || latest.reader !== current.reader || latest.queryKey !== current.queryKey
+          || latest.nextCursor !== current.nextCursor) return prev;
+        const loaded = new Set(latest.stories.map((story) => story.clusterId));
+        return {
+          ...prev,
+          [block.id]: {
+            ...latest,
+            stories: [...latest.stories, ...stories.filter((story) => !loaded.has(story.clusterId))],
+            nextCursor: page.hasMore && page.nextCursor !== current.nextCursor ? page.nextCursor : null,
+            expanded: true,
+          },
+        };
+      });
+      setAllNewsItems((prev) => mergeArticles(prev, stories.flatMap((story) => story.articles)));
     } catch (err) {
-      const code = err instanceof CyberkiwiApiError ? err.code : 'unknown';
-      addToast({ title: 'CyberKiwi', message: describeApiError(code), type: 'warning' });
+      if (readerKeyRef.current === current.reader) {
+        const code = err instanceof CyberkiwiApiError ? err.code : 'unknown';
+        addToast({ title: 'CyberKiwi', message: describeApiError(code), type: 'warning' });
+      }
+    } finally {
+      setLoadingMoreBlockId(null);
     }
-  }, [apiClient, storiesCursor, storiesHasMore, addToast, currentReaderKey]);
+  };
 
   // --- Fetch Feeds: CyberKiwi server when configured, otherwise the local universal adapter ---
   const fetchAllFeeds = useCallback(async () => {
@@ -535,8 +583,6 @@ export default function App() {
         blockRequestGenRef.current++;
         setServerStories(null);
         setBlockStories({});
-        setStoriesCursor(null);
-        setStoriesHasMore(false);
         setApiStatus({ state: 'error', code: 'unauthorized' });
         return;
       }
@@ -894,7 +940,8 @@ export default function App() {
   const getBlockNewsItems = useCallback((block: DynamicBlock): NewsItem[] => {
     // Server mode: the block shows the stories its own query returned. Archive and search still apply.
     if (apiClient && serverStories !== null) {
-      const stories = blockStories[block.id] ?? [];
+      const page = blockStories[block.id];
+      const stories = page?.reader === currentReaderKey ? page?.stories ?? [] : [];
       const q = debouncedSearchQuery.trim().toLowerCase();
       const articles = stories
         .flatMap((s) => s.articles)
@@ -961,7 +1008,7 @@ export default function App() {
     // Otherwise (no server, or before the first successful load) cluster on the client as before.
     if (serverStories) return groupItemsByStory(list, serverStories);
     return clusterNewsItems(list, settings.deduplication);
-  }, [allNewsItems, feeds, debouncedSearchQuery, showArchiveOnly, archivedArticleIds, settings.deduplication, serverStories, apiClient, blockStories]);
+  }, [allNewsItems, feeds, debouncedSearchQuery, showArchiveOnly, archivedArticleIds, settings.deduplication, serverStories, apiClient, blockStories, currentReaderKey]);
 
   // Generate AI Summary for Block
   const handleGenerateAISummaryForBlock = async (block: DynamicBlock) => {
@@ -1267,6 +1314,17 @@ export default function App() {
     return blocks.filter((b) => b.categoryFilter === selectedCategory || b.id.includes(selectedCategory));
   }, [blocks, selectedCategory]);
 
+  const focusedTopic = selectedCategory !== 'all' && !showBookmarksOnly && !showArchiveOnly;
+  const displayedBlocks = visibleBlocks.map((block) => {
+    const page = blockStories[block.id];
+    const items = getBlockNewsItems(block);
+    const topicPage = focusedTopic && serverStories !== null
+      && page?.reader === currentReaderKey && page?.queryKey === JSON.stringify(storyQueryForBlock(block))
+      ? page : undefined;
+    return { block, items: topicPage ? items : items.slice(0, block.itemCount), nextCursor: topicPage?.nextCursor };
+  });
+  const visibleStoryCount = displayedBlocks.reduce((sum, { items }) => sum + items.length, 0);
+
   const handleSelectCategory = (cat: string) => {
     setSelectedCategory(cat);
     if (cat === 'saved') {
@@ -1514,36 +1572,35 @@ export default function App() {
                 ? 'lg:grid-cols-2'
                 : 'lg:grid-cols-3'
             } gap-6`}>
-            {visibleBlocks.map((block) => {
-              const blockItems = getBlockNewsItems(block);
-              return (
-                <DynamicBlockCard
-                  key={block.id}
-                  block={block}
-                  focused={selectedCategory !== 'all'}
-                  items={blockItems}
-                  emptyKey={emptyKeyForBlock(block)}
-                  isLoading={isRefreshing}
-                  onRefreshBlock={fetchAllFeeds}
-                  onSelectArticle={handleSelectArticle}
-                  onToggleBookmark={toggleBookmark}
-                  onEditBlock={() => {
-                    setEditingBlock(block);
-                    setIsCreateBlockOpen(true);
-                  }}
-                  onDeleteBlock={() => handleDeleteBlock(block.id)}
-                  onUpdateBlockLayout={(layout) => handleUpdateBlockLayout(block.id, layout)}
-                  onGenerateAISummary={() => handleGenerateAISummaryForBlock(block)}
-                  isGeneratingAI={generatingAiBlockId === block.id}
-                  theme={settings.theme}
-                  accentColor={settings.accentColor}
-                  bookmarkedIds={bookmarkedIds}
-                  archivedIds={archivedArticleIds}
-                  onToggleArchive={handleToggleArchiveItem}
-                  language={settings.language}
-                />
-              );
-            })}
+            {displayedBlocks.map(({ block, items, nextCursor }) => (
+              <DynamicBlockCard
+                key={block.id}
+                block={block}
+                focused={focusedTopic}
+                items={items}
+                onLoadMore={nextCursor ? () => void loadMoreBlockStories(block) : undefined}
+                isLoadingMore={loadingMoreBlockId !== null}
+                emptyKey={emptyKeyForBlock(block)}
+                isLoading={isRefreshing}
+                onRefreshBlock={fetchAllFeeds}
+                onSelectArticle={handleSelectArticle}
+                onToggleBookmark={toggleBookmark}
+                onEditBlock={() => {
+                  setEditingBlock(block);
+                  setIsCreateBlockOpen(true);
+                }}
+                onDeleteBlock={() => handleDeleteBlock(block.id)}
+                onUpdateBlockLayout={(layout) => handleUpdateBlockLayout(block.id, layout)}
+                onGenerateAISummary={() => handleGenerateAISummaryForBlock(block)}
+                isGeneratingAI={generatingAiBlockId === block.id}
+                theme={settings.theme}
+                accentColor={settings.accentColor}
+                bookmarkedIds={bookmarkedIds}
+                archivedIds={archivedArticleIds}
+                onToggleArchive={handleToggleArchiveItem}
+                language={settings.language}
+              />
+            ))}
           </div>
         ) : null}
 
@@ -1552,21 +1609,14 @@ export default function App() {
             ? 'bg-neutral-900/80 border-neutral-800 text-neutral-400'
             : 'bg-neutral-200/60 border-neutral-300 text-neutral-700'
           }`}>
-          <span>{allNewsItems.length} {settings.language === 'pt' ? 'artigos' : 'articles'}</span>
+          <span>
+            {focusedTopic
+              ? `${visibleStoryCount} ${settings.language === 'pt' ? 'notícias exibidas' : (visibleStoryCount === 1 ? 'story shown' : 'stories shown')}`
+              : `${allNewsItems.length} ${settings.language === 'pt' ? 'artigos carregados' : 'articles loaded'}`}
+          </span>
           {lastUpdated && <span>{settings.language === 'pt' ? 'Atualizado' : 'Updated'} {lastUpdated.toLocaleTimeString()}</span>}
         </footer>}
 
-        {apiClient && storiesHasMore && (
-          <div className="flex flex-col items-center gap-2 py-4">
-            <button
-              type="button"
-              onClick={() => void loadMoreStories()}
-              className="px-4 py-2 rounded-control border text-sm font-bold border-neutral-700 hover:border-neutral-500 transition-colors"
-            >
-              {settings.language === 'en' ? 'Load more stories' : 'Carregar mais histórias'}
-            </button>
-          </div>
-        )}
       </main>
 
       {/* --- Modals --- */}

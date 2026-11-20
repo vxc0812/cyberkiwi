@@ -34,6 +34,8 @@ interface DynamicBlockCardProps {
   emptyKey?: 'noArticles' | 'noSources' | 'sourcesFailing';
   isLoading: boolean;
   focused?: boolean;
+  onLoadMore?: () => void;
+  isLoadingMore?: boolean;
   onRefreshBlock: () => void;
   onSelectArticle: (item: NewsItem) => void;
   onToggleBookmark: (item: NewsItem) => void;
@@ -56,6 +58,8 @@ export const DynamicBlockCard: React.FC<DynamicBlockCardProps> = ({
   emptyKey = 'noArticles',
   isLoading,
   focused = false,
+  onLoadMore,
+  isLoadingMore = false,
   onRefreshBlock,
   onSelectArticle,
   onToggleBookmark,
@@ -78,7 +82,7 @@ export const DynamicBlockCard: React.FC<DynamicBlockCardProps> = ({
   const acc = getAccent(accentColor);
   const t = getTranslation(language);
 
-  const displayItems = items.slice(0, block.itemCount);
+  const displayItems = items;
   const articleLayout = focused && block.layout === 'ticker' ? 'grid' : block.layout;
 
   const handleArticleCardKeyDown = (event: React.KeyboardEvent<HTMLElement>, item: NewsItem) => {
@@ -1025,6 +1029,20 @@ export const DynamicBlockCard: React.FC<DynamicBlockCardProps> = ({
         )}
       </div>
 
+      {onLoadMore && (
+        <div className="flex justify-center px-4 pb-4">
+          <button
+            type="button"
+            onClick={onLoadMore}
+            disabled={isLoadingMore}
+            className="rounded-control border border-neutral-500/40 px-4 py-2 text-sm font-bold hover:border-amber-500 disabled:opacity-50"
+          >
+            {isLoadingMore
+              ? (language === 'pt' ? 'Carregando…' : 'Loading…')
+              : (language === 'pt' ? 'Carregar mais notícias' : 'Load more stories')}
+          </button>
+        </div>
+      )}
     </div>
   );
 };
