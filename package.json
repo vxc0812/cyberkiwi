@@ -8,6 +8,7 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "tsx server.ts",
+    "prebuild": "npm run db:generate",
     "build": "vite build && node scripts/build-server.mjs",
     "start": "node dist/server.cjs",
     "test": "tsx tests/clustering.test.ts && tsx tests/opml.test.ts && tsx tests/readability.test.ts && tsx tests/netSafety.test.ts && tsx tests/ingestion-contract.test.ts && tsx tests/feed-policy.test.ts && tsx tests/client-api.test.ts && tsx tests/nvd-adapter.test.ts && tsx tests/load-env.test.ts && tsx tests/cybersec-blocks.test.ts && tsx tests/sanitize.test.ts && tsx tests/feed-parser.test.ts && tsx tests/external-url.test.ts && tsx tests/resource-limits.test.ts && tsx tests/network-address.test.ts && tsx tests/ai-guard.test.ts && tsx tests/cleanup.test.ts && tsx tests/ai-byok.test.ts && tsx tests/http-security.test.ts && tsx tests/read-api-auth.test.ts && tsx tests/server-read-gate.test.ts && tsx tests/enrichment-rules.test.ts && tsx tests/push-providers.test.ts && tsx tests/client-auth-keys.test.ts && tsx tests/push-rules.test.ts && tsx tests/app-links.test.ts",
