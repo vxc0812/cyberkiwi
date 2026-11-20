@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { LogIn, LogOut, UserPlus } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { AuthError } from '../services/authClient';
+import { apiFetch } from '../services/apiClient';
 
 interface Props {
   theme: 'light' | 'dark';
@@ -17,12 +18,30 @@ export function AuthPanel({ theme }: Props) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [inviteCode, setInviteCode] = useState('');
+  const [inviteRequired, setInviteRequired] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
 
   const panel = `p-4 rounded-card border space-y-3 ${dark ? 'border-neutral-800 bg-neutral-950/60' : 'border-neutral-200 bg-neutral-50/80'}`;
   const input = `w-full px-3 py-2 rounded-control border text-sm ${dark ? 'bg-neutral-900 border-neutral-700 text-neutral-100' : 'bg-white border-neutral-300 text-neutral-900'}`;
   const button = 'px-3 py-2 rounded-control font-bold text-sm border disabled:opacity-50 flex items-center gap-1.5';
+
+  useEffect(() => {
+    if (mode !== 'register' || isLoading || user) return;
+    const controller = new AbortController();
+    setInviteRequired(true);
+    void (async () => {
+      try {
+        const response = await apiFetch('/api/auth/registration', { signal: controller.signal });
+        if (!response.ok) return;
+        const policy = await response.json();
+        if (!controller.signal.aborted) setInviteRequired(policy.inviteRequired !== false);
+      } catch {
+        // Keep the field available if the server's policy cannot be read.
+      }
+    })();
+    return () => controller.abort();
+  }, [mode, isLoading, user]);
 
   if (isLoading) {
     return (
@@ -71,7 +90,7 @@ export function AuthPanel({ theme }: Props) {
       if (mode === 'login') {
         await login(email.trim(), password);
       } else {
-        await register(email.trim(), password, inviteCode.trim());
+        await register(email.trim(), password, inviteRequired ? inviteCode.trim() : '');
         setMode('login');
         setMessage({ tone: 'ok', text: 'Account created. Sign in to continue.' });
       }
@@ -111,7 +130,7 @@ export function AuthPanel({ theme }: Props) {
           className={input}
         />
 
-        {mode === 'register' && (
+        {mode === 'register' && inviteRequired && (
           <>
             <label htmlFor="auth-invite" className="block text-sm font-medium">Invite code</label>
             <input id="auth-invite" type="text" autoComplete="off" value={inviteCode} onChange={(e) => setInviteCode(e.target.value)} className={input} />

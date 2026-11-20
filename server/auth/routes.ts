@@ -43,6 +43,11 @@ function tokenResponse(res: Response, issued: { token: string; expiresAt: Date; 
 export function createAuthRouter(db: PrismaClient, options: { secureCookies: boolean; openRegistration?: boolean }): Router {
   const router = Router();
 
+  router.get('/registration', (_req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ inviteRequired: !options.openRegistration });
+  });
+
   router.post('/register', async (req: Request, res: Response) => {
     const email = normalizeEmail(req.body?.email);
     if (!email) return res.status(400).json({ success: false, error: 'A valid email is required' });
