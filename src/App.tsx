@@ -1315,6 +1315,7 @@ export default function App() {
   }, [blocks, selectedCategory]);
 
   const focusedTopic = selectedCategory !== 'all' && !showBookmarksOnly && !showArchiveOnly;
+  const isOverview = selectedCategory === 'all' && !showBookmarksOnly && !showArchiveOnly;
   const displayedBlocks = visibleBlocks.map((block) => {
     const page = blockStories[block.id];
     const items = getBlockNewsItems(block);
@@ -1322,7 +1323,7 @@ export default function App() {
       && page?.reader === currentReaderKey && page?.queryKey === JSON.stringify(storyQueryForBlock(block))
       ? page : undefined;
     return { block, items: topicPage ? items : items.slice(0, block.itemCount), nextCursor: topicPage?.nextCursor };
-  });
+  }).filter(({ items }) => !isOverview || items.length > 0);
   const visibleStoryCount = displayedBlocks.reduce((sum, { items }) => sum + items.length, 0);
 
   const handleSelectCategory = (cat: string) => {
