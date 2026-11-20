@@ -1,7 +1,7 @@
 /**
  * Account routes (mounted at /api/auth).
  *
- *   POST   /register          invite code + email + password. Does not sign the user in.
+ *   POST   /register          email + password, with an invite unless open registration is enabled.
  *   POST   /login             web: sets the session cookie. client:"native": returns access and refresh tokens.
  *   POST   /refresh           native only: rotates the refresh token and returns a new access token.
  *   POST   /logout            revokes the current session and clears the cookie.
@@ -40,7 +40,7 @@ function tokenResponse(res: Response, issued: { token: string; expiresAt: Date; 
   };
 }
 
-export function createAuthRouter(db: PrismaClient, options: { secureCookies: boolean }): Router {
+export function createAuthRouter(db: PrismaClient, options: { secureCookies: boolean; openRegistration?: boolean }): Router {
   const router = Router();
 
   router.post('/register', async (req: Request, res: Response) => {
@@ -49,13 +49,19 @@ export function createAuthRouter(db: PrismaClient, options: { secureCookies: boo
     const problem = passwordProblem(req.body?.password);
     if (problem) return res.status(400).json({ success: false, error: problem });
     const code = req.body?.inviteCode;
-    if (!plausibleInviteCode(code)) return res.status(400).json({ success: false, error: 'Invite code is not valid' });
+    const withoutInvite = code === undefined || code === '';
+    if (withoutInvite && !options.openRegistration) {
+      return res.status(400).json({ success: false, error: 'An invite code is required' });
+    }
+    if (!withoutInvite && !plausibleInviteCode(code)) {
+      return res.status(400).json({ success: false, error: 'Invite code is not valid' });
+    }
 
     try {
       const passwordHash = await hashPassword(req.body.password);
       const user = await db.$transaction(async (tx) => {
-        const inviteId = await redeemInvite(tx, code);
-        if (!inviteId) throw new InviteRejected();
+        const inviteId = withoutInvite ? null : await redeemInvite(tx, code);
+        if (!withoutInvite && !inviteId) throw new InviteRejected();
         return tx.user.create({ data: { email, passwordHash, inviteId }, select: { id: true, email: true } });
       });
       return res.status(201).json({ success: true, user });

@@ -136,7 +136,7 @@ export default function App() {
   const apiClient = useMemo<CyberkiwiApiClient | null>(() => {
     try {
       const base = configuredApiBaseUrl((import.meta as any).env ?? {}, isNativePlatform());
-      // Story and article reads are invite-only, so requests carry the session (see authedFetchUrl).
+      // Story and article reads require sign-in, so requests carry the session (see authedFetchUrl).
       return base === null ? null : createCyberkiwiApiClient({ baseUrl: base, fetchImpl: authedFetchUrl });
     } catch (err) {
       // A misconfigured URL must not break the app: fall back to the local adapter.
@@ -144,7 +144,7 @@ export default function App() {
       return null;
     }
   }, []);
-  // Stored stories and articles are invite-only: reads wait for session restore, are skipped while
+  // Stored stories and articles require sign-in: reads wait for session restore, are skipped while
   // signed out, and run again when the signed-in user changes (see serverReadGate.ts).
   const { user: authUser, isLoading: authLoading } = useAuth();
   const authUserId = authUser?.id ?? null;
@@ -1361,8 +1361,8 @@ export default function App() {
           <section className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-amber-500/40 bg-amber-500/10 p-4">
             <p className="text-sm">
               {settings.language === 'pt'
-                ? 'Entre para ler as notícias. O acesso à versão de testes é por convite.'
-                : 'Sign in to read stories. Pre-beta access is by invitation.'}
+                ? 'Entre ou crie uma conta para ler as notícias.'
+                : 'Sign in or create an account to read stories.'}
             </p>
             <button
               type="button"

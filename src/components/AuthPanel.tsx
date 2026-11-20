@@ -9,7 +9,7 @@ interface Props {
 
 const PASSWORD_MIN = 12;
 
-/** Login and registration. Registration needs an invite code; the server rejects anything else. */
+/** Login and registration. The server decides whether an invite is required. */
 export function AuthPanel({ theme }: Props) {
   const { user, isLoading, login, register, logout } = useAuth();
   const dark = theme === 'dark';
@@ -114,7 +114,7 @@ export function AuthPanel({ theme }: Props) {
         {mode === 'register' && (
           <>
             <label htmlFor="auth-invite" className="block text-sm font-medium">Invite code</label>
-            <input id="auth-invite" type="text" autoComplete="off" required value={inviteCode} onChange={(e) => setInviteCode(e.target.value)} className={input} />
+            <input id="auth-invite" type="text" autoComplete="off" value={inviteCode} onChange={(e) => setInviteCode(e.target.value)} className={input} />
           </>
         )}
 

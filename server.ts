@@ -604,7 +604,10 @@ const authLimiter = rateLimit({
 });
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
-app.use('/api/auth', createAuthRouter(db, { secureCookies: IS_PRODUCTION }));
+app.use('/api/auth', createAuthRouter(db, {
+  secureCookies: IS_PRODUCTION,
+  openRegistration: process.env.OPEN_REGISTRATION === 'true',
+}));
 app.use('/api/admin', createAdminRouter(db));
 app.use('/api/devices', createDevicesRouter(db));
 

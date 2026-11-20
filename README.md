@@ -110,7 +110,7 @@ Run the workflow again with the upload option checked. After the build processes
 
 ## Access model
 
-Pre-beta access is invite-only for **stored** content, not for every endpoint that returns content.
+Stored content requires sign-in. Registration requires an invite by default. Set `OPEN_REGISTRATION=true` on the server to let users create accounts without a code. Remove the variable to require invites again. Accounts created during open registration can still sign in.
 
 | Endpoint | Sign-in | Why |
 |---|---|---|
