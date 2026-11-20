@@ -155,6 +155,10 @@ android/ ios/          Capacitor native projects
 tests/                 Unit tests; tests/integration/ needs PostgreSQL
 ```
 
+## Contributors
+
+OpenAI Codex contributed to the iOS build and TestFlight workflow and its setup documentation.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
