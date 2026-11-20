@@ -1,0 +1,21 @@
+# Local PostgreSQL for CyberKiwi development. Not for production use.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cyberkiwi
+      POSTGRES_PASSWORD: cyberkiwi
+      POSTGRES_DB: cyberkiwi
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - cyberkiwi-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cyberkiwi -d cyberkiwi"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  cyberkiwi-pg:

@@ -1,0 +1,476 @@
+// CyberKiwi Phase 1 data model: sources, feeds, articles, stories and ingestion runs.
+// Ingestion writes these tables from the server-side worker only. Clients read through the API.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum IngestionStatus {
+  RUNNING
+  SUCCEEDED
+  PARTIAL
+  FAILED
+  SKIPPED
+}
+
+enum IngestionTrigger {
+  SCHEDULED
+  MANUAL
+}
+
+/// A publisher or curated source (for example a vendor blog or a news outlet).
+model Source {
+  id          String   @id @default(uuid()) @db.Uuid
+  slug        String   @unique
+  name        String
+  homepageUrl String?
+  category    String
+  language    String   @default("en")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  feeds Feed[]
+}
+
+/// One RSS/Atom endpoint belonging to a source. Holds fetch and health state.
+model Feed {
+  id                   String  @id @default(uuid()) @db.Uuid
+  sourceId             String  @db.Uuid
+  url                  String  @unique
+  title                String?
+  category             String
+  language             String  @default("en")
+  active               Boolean @default(true)
+  /// Why the feed is intentionally inactive (catalog decision). Null for active feeds.
+  disabledReason       String?
+  fetchIntervalMinutes Int     @default(15)
+
+  etag         String?
+  lastModified String?
+
+  lastAttemptAt       DateTime?
+  lastSuccessAt       DateTime?
+  lastFailureAt       DateTime?
+  lastError           String?
+  consecutiveFailures Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  source   Source         @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  articles Article[]
+  runs     IngestionRun[]
+
+  @@index([active, lastAttemptAt])
+}
+
+/// A normalized article from a feed item. Identity is (feedId, externalId).
+model Article {
+  id           String    @id @default(uuid()) @db.Uuid
+  feedId       String    @db.Uuid
+  /// Feed GUID when present, otherwise the normalized link.
+  externalId   String
+  url          String
+  /// Normalized URL used for cross-feed matching (tracking params removed).
+  canonicalUrl String
+  title        String
+  excerpt      String?
+  author       String?
+  imageUrl     String?
+  language     String?
+  publishedAt  DateTime?
+  contentHash  String
+  firstSeenAt  DateTime  @default(now())
+  lastSeenAt   DateTime  @default(now())
+
+  feed           Feed               @relation(fields: [feedId], references: [id], onDelete: Cascade)
+  storyLink      StoryArticle?
+  enrichmentJobs EnrichmentJob[]
+  cves           ArticleCve[]
+  techniques     ArticleTechnique[]
+  entities       ArticleEntity[]
+  sortAt         DateTime           @default(now())
+
+  @@unique([feedId, externalId])
+  @@index([canonicalUrl])
+  @@index([publishedAt])
+  @@index([sortAt, id])
+}
+
+/// A cluster of articles that cover the same event across sources.
+model Story {
+  id                      String    @id @default(uuid()) @db.Uuid
+  title                   String
+  summary                 String?
+  representativeArticleId String?   @db.Uuid
+  articleCount            Int       @default(0)
+  firstPublishedAt        DateTime?
+  lastPublishedAt         DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  articles StoryArticle[]
+
+  clusterKey String   @unique
+  sortAt     DateTime @default(now())
+
+  @@index([lastPublishedAt])
+  @@index([sortAt, id])
+}
+
+/// Link between a story and one of its articles. Each article belongs to at most one story.
+model StoryArticle {
+  storyId    String   @db.Uuid
+  articleId  String   @unique @db.Uuid
+  method     String
+  score      Float?
+  assignedAt DateTime @default(now())
+
+  story   Story   @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@id([storyId, articleId])
+}
+
+/// One fetch attempt for one feed. Written by the worker for observability and retries.
+model IngestionRun {
+  id           String           @id @default(uuid()) @db.Uuid
+  feedId       String           @db.Uuid
+  trigger      IngestionTrigger @default(SCHEDULED)
+  status       IngestionStatus  @default(RUNNING)
+  startedAt    DateTime         @default(now())
+  finishedAt   DateTime?
+  durationMs   Int?
+  httpStatus   Int?
+  itemsSeen    Int              @default(0)
+  itemsNew     Int              @default(0)
+  itemsUpdated Int              @default(0)
+  errorCode    String?
+  errorMessage String?
+
+  feed Feed @relation(fields: [feedId], references: [id], onDelete: Cascade)
+
+  @@index([feedId, startedAt])
+  @@index([status, startedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Accounts, sessions and devices (invite-only pre-beta)
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum SessionKind {
+  /// Browser session: opaque token in a Secure, HttpOnly, SameSite=Lax cookie.
+  WEB
+  /// Native session: short-lived access token in memory, refresh token in Keychain/Keystore.
+  NATIVE
+}
+
+enum DevicePlatform {
+  IOS
+  ANDROID
+  WEB
+}
+
+model User {
+  id             String       @id @default(uuid()) @db.Uuid
+  /// Stored lower-cased. Unique.
+  email          String       @unique
+  /// scrypt hash in the form scrypt$N$r$p$salt$hash. Never returned by the API.
+  passwordHash   String
+  role           UserRole     @default(USER)
+  status         UserStatus   @default(ACTIVE)
+  preferences    Json?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  lastLoginAt    DateTime?
+  inviteId       String?      @db.Uuid
+  invite         InviteCode?  @relation("InviteRedemption", fields: [inviteId], references: [id], onDelete: SetNull)
+  invitesCreated InviteCode[] @relation("InviteCreator")
+
+  sessions Session[]
+  devices  Device[]
+}
+
+/// Invite codes gate registration. Only the SHA-256 of the code is stored.
+model InviteCode {
+  id          String    @id @default(uuid()) @db.Uuid
+  codeHash    String    @unique
+  cohort      String?
+  maxUses     Int       @default(1)
+  usedCount   Int       @default(0)
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  createdById String?   @db.Uuid
+  createdBy   User?     @relation("InviteCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  redeemedBy  User[]    @relation("InviteRedemption")
+}
+
+/// One login. `tokenHash` is the SHA-256 of the cookie or access token; the raw value is never stored.
+model Session {
+  id                  String      @id @default(uuid()) @db.Uuid
+  userId              String      @db.Uuid
+  kind                SessionKind
+  tokenHash           String      @unique
+  expiresAt           DateTime
+  refreshHash         String?     @unique
+  refreshExpiresAt    DateTime?
+  /// Hash of the refresh token that the last rotation replaced. Presenting it again means theft: the session is revoked.
+  previousRefreshHash String?     @unique
+  /// When the current refresh token was issued. Used for the short grace window after rotation.
+  refreshRotatedAt    DateTime?
+  /// SHA-256 of the per-session CSRF token. The raw token is never stored. Required on cookie-authenticated writes.
+  csrfHash            String?
+  deviceId            String?     @db.Uuid
+  userAgent           String?
+  createdAt           DateTime    @default(now())
+  lastSeenAt          DateTime    @default(now())
+  revokedAt           DateTime?
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([userId, revokedAt])
+}
+
+/// A mobile or web device registered for push notifications. Push credentials stay on the server.
+model Device {
+  id                String         @id @default(uuid()) @db.Uuid
+  userId            String         @db.Uuid
+  platform          DevicePlatform
+  pushToken         String         @unique
+  appVersion        String
+  notificationPrefs Json           @default("{}")
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  lastSeenAt        DateTime       @default(now())
+  revokedAt         DateTime?
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions Session[]
+  pushJobs PushJob[]
+
+  @@index([userId])
+}
+
+/// Daily AI usage per identity. Identity is "user:<id>", "desktop", "platform" or "byok:<sha256 of key>".
+/// Stored in PostgreSQL so limits survive restarts and hold across replicas.
+model AiQuotaUsage {
+  identity  String
+  day       String   @db.VarChar(10)
+  count     Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@id([identity, day])
+}
+
+// ---------------------------------------------------------------------------
+// Enrichment: CVE, KEV, EPSS, ATT&CK and entities
+// ---------------------------------------------------------------------------
+
+enum SeveritySource {
+  NVD
+  ARTICLE
+  UNKNOWN
+}
+
+enum EnrichmentJobStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+}
+
+enum EntityType {
+  VENDOR
+  PRODUCT
+  MALWARE_FAMILY
+  THREAT_ACTOR
+}
+
+/// One enrichment provider run for one article. Unique per (article, provider), so re-enqueueing is a no-op.
+model EnrichmentJob {
+  id            String              @id @default(uuid()) @db.Uuid
+  articleId     String              @db.Uuid
+  provider      String
+  status        EnrichmentJobStatus @default(PENDING)
+  attempts      Int                 @default(0)
+  nextAttemptAt DateTime            @default(now())
+  lastError     String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@unique([articleId, provider])
+  @@index([status, nextAttemptAt])
+}
+
+/// A CVE identifier. KEV and EPSS fields are updated in place, with provenance and updatedAt kept.
+model Cve {
+  /// CVE identifier, for example CVE-2024-1234. Normalized to upper case.
+  id                String         @id
+  cvssScore         Float?
+  cvssSeverity      String?
+  /// Where cvssSeverity came from. ARTICLE is parsed from a CVE article's summary and is provisional.
+  severitySource    SeveritySource @default(UNKNOWN)
+  severityUpdatedAt DateTime?
+  publishedAt       DateTime?
+  knownExploited    Boolean        @default(false)
+  epss              Float?
+  epssPercentile    Float?
+  epssDate          DateTime?      @db.Date
+  provider          String
+  sourceUpdatedAt   DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  kev           KevEntry?
+  articles      ArticleCve[]
+  epssSnapshots EpssSnapshot[]
+
+  @@index([knownExploited])
+  @@index([epss])
+}
+
+/// CISA Known Exploited Vulnerabilities entry.
+model KevEntry {
+  cveId                 String    @id
+  vendorProject         String?
+  product               String?
+  dateAdded             DateTime  @db.Date
+  dueDate               DateTime? @db.Date
+  ransomwareCampaignUse Boolean   @default(false)
+  sourceUpdatedAt       DateTime?
+  updatedAt             DateTime  @updatedAt
+
+  cve Cve @relation(fields: [cveId], references: [id], onDelete: Cascade)
+}
+
+/// Daily EPSS score history for CVEs we track.
+model EpssSnapshot {
+  cveId      String
+  date       DateTime @db.Date
+  epss       Float
+  percentile Float
+
+  cve Cve @relation(fields: [cveId], references: [id], onDelete: Cascade)
+
+  @@id([cveId, date])
+}
+
+model ArticleCve {
+  articleId String   @db.Uuid
+  cveId     String
+  provider  String
+  createdAt DateTime @default(now())
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  cve     Cve     @relation(fields: [cveId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, cveId])
+  @@index([cveId])
+}
+
+/// MITRE ATT&CK technique, for example T1190 or T1059.001.
+model MitreTechnique {
+  id       String             @id
+  name     String
+  tactic   String?
+  articles ArticleTechnique[]
+}
+
+model ArticleTechnique {
+  articleId   String   @db.Uuid
+  techniqueId String
+  provider    String
+  createdAt   DateTime @default(now())
+
+  article   Article        @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  technique MitreTechnique @relation(fields: [techniqueId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, techniqueId])
+  @@index([techniqueId])
+}
+
+/// Vendor, product, malware family or threat actor. One table, distinguished by type.
+model Entity {
+  id       String          @id @default(uuid()) @db.Uuid
+  type     EntityType
+  slug     String
+  name     String
+  articles ArticleEntity[]
+
+  @@unique([type, slug])
+}
+
+model ArticleEntity {
+  articleId String   @db.Uuid
+  entityId  String   @db.Uuid
+  provider  String
+  createdAt DateTime @default(now())
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  entity  Entity  @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, entityId])
+  @@index([entityId])
+}
+
+/// Last run of a catalog-level sync (KEV, EPSS). One row per provider.
+model CatalogSync {
+  provider        String    @id
+  lastAttemptAt   DateTime?
+  lastSuccessAt   DateTime?
+  lastStatus      String?
+  lastError       String?
+  sourceUpdatedAt DateTime?
+  rowsUpdated     Int       @default(0)
+}
+
+enum PushJobStatus {
+  PENDING
+  RUNNING
+  SENT
+  FAILED
+  INVALID
+}
+
+/// One notification for one device. dedupeKey = kind + story + category + time window + device, so the same
+/// story is never pushed twice to the same device in the same window, even if ingestion runs again.
+model PushJob {
+  id            String        @id @default(uuid()) @db.Uuid
+  deviceId      String        @db.Uuid
+  dedupeKey     String        @unique
+  kind          String
+  storyId       String?       @db.Uuid
+  category      String?
+  title         String
+  deepLink      String?
+  status        PushJobStatus @default(PENDING)
+  attempts      Int           @default(0)
+  nextAttemptAt DateTime      @default(now())
+  lastError     String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+}

@@ -1,0 +1,28 @@
+name: Server
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      # A bundle that builds can still crash on load; boot it and hit /health.
+      # Database connectivity is not covered here and remains unverified.
+      - name: Production server boot smoke test
+        run: npm run smoke:server

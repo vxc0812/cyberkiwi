@@ -1,0 +1,915 @@
+// Electron main process for the "CyberKiwi" desktop app.
+// Starts the bundled Express server (dist/server.cjs) on a free local port
+// and opens the app in a native window with Windows and Linux integration.
+const { app, BrowserWindow, shell, dialog, Menu, Tray, ipcMain, Notification, screen, clipboard, nativeImage } = require('electron');
+const { autoUpdater } = require('electron-updater');
+const { execFile } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+const net = require('net');
+const dotenv = require('dotenv');
+
+// Set Application User Model ID and Name for Windows notifications and taskbar
+app.setName('CyberKiwi');
+if (process.platform === 'win32') app.setAppUserModelId('com.cyberkiwi.client');
+if (process.platform === 'linux') app.setDesktopName('radar-rss.desktop');
+const { createAutoStart } = require('./autostart.cjs');
+const autoStart = createAutoStart(app);
+const { normalizeExternalUrl } = require('./externalUrl.cjs');
+
+/**
+ * The only path from the app to the system browser. Anything that is not a plain http(s) URL is
+ * refused, so a page or IPC message cannot launch another protocol handler through shell.openExternal.
+ */
+function openExternalSafe(url, source) {
+  const safe = normalizeExternalUrl(url);
+  if (!safe) {
+    console.warn(`[security] Refused to open external URL from ${source}`);
+    return false;
+  }
+  shell.openExternal(safe).catch((err) => console.warn('[security] openExternal failed:', err && err.message));
+  return true;
+}
+
+/** Per-launch token for the bundled server's AI routes. Set when the server starts. */
+let aiAccessToken = null;
+/** Per-launch id that the bundled server reports on /health. */
+let instanceId = null;
+
+/** True only for the app's own local server, matched by parsed hostname (not by string prefix). */
+function isLocalAppUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' && parsed.hostname === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
+function getAppIconPaths() {
+  const appPath = app.getAppPath();
+  const exeDir = path.dirname(process.execPath);
+  const searchDirs = [
+    path.join(appPath, 'build'),
+    path.join(__dirname, '..', 'build'),
+    path.join(exeDir, 'resources', 'app', 'build'),
+    path.join(exeDir, 'resources', 'build'),
+    path.join(process.resourcesPath || '', 'app', 'build'),
+    path.join(process.resourcesPath || '', 'build'),
+    path.join(appPath, 'public'),
+    path.join(__dirname, '..', 'public'),
+  ];
+
+  let icoPath = null;
+  let pngPath = null;
+
+  for (const dir of searchDirs) {
+    try {
+      const ico = path.join(dir, 'icon.ico');
+      const png = path.join(dir, 'icon.png');
+      if (!icoPath && fs.existsSync(ico)) icoPath = ico;
+      if (!pngPath && fs.existsSync(png)) pngPath = png;
+    } catch (_) {}
+  }
+
+  return {
+    icoPath,
+    pngPath,
+    primaryIcon: process.platform === 'win32' ? (icoPath || pngPath) : (pngPath || icoPath),
+  };
+}
+
+function registerWindowsAumid(icoPath, pngPath) {
+  if (process.platform !== 'win32') return;
+  const aumidKey = 'HKCU\\Software\\Classes\\AppUserModelId\\com.cyberkiwi.client';
+  const iconPath = (icoPath && fs.existsSync(icoPath)) ? `${icoPath},0` : (pngPath || process.execPath);
+
+  try {
+    execFile('reg.exe', ['add', aumidKey, '/v', 'DisplayName', '/d', 'CyberKiwi', '/f'], (err) => {
+      if (err) debugLog('Notice: reg add DisplayName failed:', err?.message || err);
+    });
+    execFile('reg.exe', ['add', aumidKey, '/v', 'IconUri', '/d', iconPath, '/f'], (err) => {
+      if (err) debugLog('Notice: reg add IconUri failed:', err?.message || err);
+    });
+    execFile('reg.exe', ['add', aumidKey, '/v', 'IconBackgroundColor', '/d', '0', '/f'], (err) => {
+      if (err) debugLog('Notice: reg add IconBackgroundColor failed:', err?.message || err);
+    });
+    execFile('reg.exe', ['add', aumidKey, '/v', 'ShowInSettings', '/t', 'REG_DWORD', '/d', '1', '/f'], (err) => {
+      if (err) debugLog('Notice: reg add ShowInSettings failed:', err?.message || err);
+    });
+  } catch (err) {
+    debugLog('Notice: registerWindowsAumid error:', err?.message || err);
+  }
+}
+
+function refreshWindowsIconCache() {
+  if (process.platform !== 'win32') return;
+  try {
+    execFile('ie4uinit.exe', ['-show'], (err) => {
+      if (err) debugLog('Notice: ie4uinit failed:', err?.message || err);
+    });
+  } catch (err) {
+    debugLog('Notice: refreshWindowsIconCache error:', err?.message || err);
+  }
+}
+
+function registerWindowsShortcut(icoPath, pngPath) {
+  if (process.platform !== 'win32') return;
+  try {
+    const programsDir = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs');
+    const shortcutPath = path.join(programsDir, 'CyberKiwi.lnk');
+    const staleElectronShortcut = path.join(programsDir, 'Electron.lnk');
+
+    // Clean up stale electron development shortcut if present
+    if (fs.existsSync(staleElectronShortcut)) {
+      try { fs.unlinkSync(staleElectronShortcut); } catch (_) {}
+    }
+
+    // Always remove existing shortcut first to ensure clean creation and update of COM properties
+    if (fs.existsSync(shortcutPath)) {
+      try {
+        fs.unlinkSync(shortcutPath);
+      } catch (e) {
+        debugLog('Could not unlink existing shortcut, proceeding:', e?.message || e);
+      }
+    }
+
+    const iconToUse = (icoPath && fs.existsSync(icoPath)) ? icoPath : (pngPath || process.execPath);
+    const targetPath = app.isPackaged ? process.execPath : process.execPath;
+    const targetArgs = app.isPackaged ? '' : `"${app.getAppPath()}"`;
+
+    const op = fs.existsSync(shortcutPath) ? 'replace' : 'create';
+    shell.writeShortcutLink(shortcutPath, op, {
+      target: targetPath,
+      args: targetArgs,
+      description: 'CyberKiwi - Leitor de Notícias Inteligente',
+      icon: iconToUse,
+      iconIndex: 0,
+      appUserModelId: 'com.cyberkiwi.client',
+    });
+    debugLog('Created/verified Start Menu shortcut with AppUserModelId at:', shortcutPath, 'icon:', iconToUse);
+  } catch (err) {
+    debugLog('Notice: Could not write Start Menu shortcut:', err?.message || err);
+  }
+}
+
+// Linux packages can live in read-only directories; prefer writable user configuration.
+if (process.platform === 'linux') dotenv.config({ path: path.join(app.getPath('userData'), '.env') });
+// Also support .env next to the executable or the original AppImage.
+if (process.platform === 'linux' && process.env.APPIMAGE) {
+  dotenv.config({ path: path.join(path.dirname(process.env.APPIMAGE), '.env') });
+}
+const exeDir = path.dirname(process.execPath);
+dotenv.config({ path: path.join(exeDir, '.env') });
+dotenv.config({ path: path.join(app.getAppPath(), '.env') });
+
+process.env.NODE_ENV = 'production';
+
+function debugLog(...args) {
+  try {
+    const msg = `[${new Date().toISOString()}] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`;
+    try {
+      const userData = app.getPath('userData');
+      if (!fs.existsSync(userData)) {
+        fs.mkdirSync(userData, { recursive: true });
+      }
+      fs.appendFileSync(path.join(userData, 'radar-debug.log'), msg);
+    } catch (_) {}
+    try {
+      fs.appendFileSync(path.join(app.getAppPath(), 'radar-debug.log'), msg);
+    } catch (_) {}
+  } catch (_) {}
+}
+
+process.on('uncaughtException', (err) => {
+  debugLog('uncaughtException:', err?.stack || err);
+});
+process.on('unhandledRejection', (err) => {
+  debugLog('unhandledRejection:', err?.stack || err);
+});
+
+debugLog('App starting. Process ID:', process.pid, 'Argv:', process.argv);
+
+const gotTheLock = app.requestSingleInstanceLock();
+debugLog('gotTheLock:', gotTheLock);
+if (!gotTheLock) {
+  debugLog('Lock NOT acquired, calling app.quit()');
+  app.quit();
+} else {
+  app.on('second-instance', (_event, commandLine) => {
+    debugLog('second-instance triggered with args:', commandLine);
+    showAndFocusWindow();
+  });
+}
+
+let mainWindow = null;
+let tray = null;
+let isQuitting = false;
+let hasShownTrayBalloon = false;
+
+// --- Desktop Settings Persistence ---
+function getDesktopSettingsPath() {
+  return path.join(app.getPath('userData'), 'desktop-settings.json');
+}
+
+function loadDesktopSettings() {
+  try {
+    const file = getDesktopSettingsPath();
+    if (fs.existsSync(file)) {
+      return JSON.parse(fs.readFileSync(file, 'utf-8'));
+    }
+  } catch (err) {
+    console.warn('[DesktopSettings] Failed to read settings:', err);
+  }
+  return { minimizeToTray: process.platform !== 'linux', flashOnBreaking: true };
+}
+
+function saveDesktopSettings(settings) {
+  try {
+    const file = getDesktopSettingsPath();
+    fs.writeFileSync(file, JSON.stringify(settings, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('[DesktopSettings] Failed to save settings:', err);
+  }
+}
+
+let desktopSettings = loadDesktopSettings();
+
+// --- Window State Persistence ---
+function getWindowStatePath() {
+  return path.join(app.getPath('userData'), 'window-state.json');
+}
+
+function loadWindowState() {
+  const defaultState = { width: 1380, height: 880, isMaximized: false };
+  try {
+    const file = getWindowStatePath();
+    if (fs.existsSync(file)) {
+      const state = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      // Verify the saved position intersects with an active monitor
+      if (typeof state.x === 'number' && typeof state.y === 'number') {
+        const visibleOnDisplay = screen.getAllDisplays().some((display) => {
+          const { x, y, width, height } = display.bounds;
+          return (
+            state.x >= x - 20 &&
+            state.y >= y - 20 &&
+            state.x < x + width &&
+            state.y < y + height
+          );
+        });
+        if (visibleOnDisplay) {
+          return state;
+        }
+      }
+      return { ...defaultState, width: state.width || defaultState.width, height: state.height || defaultState.height };
+    }
+  } catch (err) {
+    console.warn('[WindowState] Failed to load state:', err);
+  }
+  return defaultState;
+}
+
+function saveWindowState() {
+  if (!mainWindow) return;
+  try {
+    const isMaximized = mainWindow.isMaximized();
+    let bounds = { isMaximized };
+    if (!isMaximized) {
+      bounds = { ...mainWindow.getBounds(), isMaximized: false };
+    } else {
+      const existing = loadWindowState();
+      bounds = { ...existing, isMaximized: true };
+    }
+    fs.writeFileSync(getWindowStatePath(), JSON.stringify(bounds, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('[WindowState] Failed to save state:', err);
+  }
+}
+
+let saveStateTimeout = null;
+function debouncedSaveWindowState() {
+  if (saveStateTimeout) clearTimeout(saveStateTimeout);
+  saveStateTimeout = setTimeout(saveWindowState, 400);
+}
+
+function showAndFocusWindow() {
+  debugLog('showAndFocusWindow called. mainWindow exists:', Boolean(mainWindow));
+  if (!mainWindow) return;
+  debugLog('Before show - isMinimized:', mainWindow.isMinimized(), 'isVisible:', mainWindow.isVisible());
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.setAlwaysOnTop(true);
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.setAlwaysOnTop(false);
+  debugLog('After show - isMinimized:', mainWindow.isMinimized(), 'isVisible:', mainWindow.isVisible(), 'bounds:', mainWindow.getBounds());
+}
+
+function getFreePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+    srv.on('error', reject);
+  });
+}
+
+/**
+ * Waits until the bundled server answers /health with this launch's instance id. A bare HTTP 200 is not
+ * enough: the port is released before the server binds it, and another local process could take it (F50).
+ */
+async function waitForServer(healthUrl, expectedInstance, timeoutMs = 12000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const res = await fetch(healthUrl);
+      if (res.ok) {
+        const body = await res.json().catch(() => null);
+        if (body && body.instance === expectedInstance) return true;
+      }
+    } catch {
+      // server not up yet
+    }
+    await new Promise((r) => setTimeout(r, 30));
+  }
+  return false;
+}
+
+// --- System Tray Setup ---
+function createTray(iconPath) {
+  if (tray) return;
+
+  try {
+    let img = nativeImage.createFromPath(iconPath);
+    if (!img || img.isEmpty()) {
+      const { pngPath, icoPath } = getAppIconPaths();
+      if (pngPath) img = nativeImage.createFromPath(pngPath);
+      else if (icoPath) img = nativeImage.createFromPath(icoPath);
+    }
+    if (img && !img.isEmpty()) {
+      img = img.resize({ width: 16, height: 16 });
+    }
+    tray = new Tray(img);
+  } catch (err) {
+    console.warn('[Tray] Failed to create tray:', err);
+    return;
+  }
+
+  const updateContextMenu = () => {
+    const isAutoStart = autoStart.get();
+    const contextMenu = Menu.buildFromTemplate([
+      {
+        label: `CyberKiwi v${app.getVersion()}`,
+        enabled: false,
+      },
+      { type: 'separator' },
+      {
+        label: 'Abrir CyberKiwi',
+        click: () => showAndFocusWindow(),
+      },
+      {
+        label: 'Atualizar Feeds Agora',
+        click: () => {
+          if (mainWindow && mainWindow.webContents) {
+            mainWindow.webContents.send('desktop:refresh-feeds');
+          }
+        },
+      },
+      { type: 'separator' },
+      {
+        label: 'Minimizar para a Bandeja ao Fechar',
+        type: 'checkbox',
+        checked: desktopSettings.minimizeToTray,
+        click: (item) => {
+          desktopSettings.minimizeToTray = item.checked;
+          saveDesktopSettings(desktopSettings);
+        },
+      },
+      {
+        label: process.platform === 'win32' ? 'Iniciar com o Windows' : 'Iniciar com o sistema',
+        type: 'checkbox',
+        checked: isAutoStart,
+        click: (item) => {
+          autoStart.set(item.checked);
+          updateContextMenu();
+        },
+      },
+      { type: 'separator' },
+      {
+        label: 'Verificar Atualizações...',
+        click: () => {
+          checkForUpdates().catch((err) => {
+            dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: 'Atualizações',
+              message: 'Não foi possível verificar atualizações agora.',
+              detail: err?.message || String(err),
+            });
+          });
+        },
+      },
+      { type: 'separator' },
+      {
+        label: 'Sair do CyberKiwi',
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        },
+      },
+    ]);
+
+    tray.setContextMenu(contextMenu);
+  };
+
+  tray.setToolTip('CyberKiwi - Leitor de Notícias Inteligente');
+  updateContextMenu();
+
+  tray.on('click', () => {
+    if (mainWindow) {
+      if (mainWindow.isVisible() && mainWindow.isFocused()) {
+        mainWindow.hide();
+      } else {
+        showAndFocusWindow();
+      }
+    }
+  });
+
+  tray.on('double-click', () => {
+    showAndFocusWindow();
+  });
+}
+
+// --- Context Menu for WebContents ---
+function setupContextMenu(window) {
+  window.webContents.on('context-menu', (_event, params) => {
+    const menuTemplate = [];
+
+    if (params.isEditable) {
+      menuTemplate.push(
+        { role: 'undo', label: 'Desfazer' },
+        { role: 'redo', label: 'Refazer' },
+        { type: 'separator' },
+        { role: 'cut', label: 'Recortar' },
+        { role: 'copy', label: 'Copiar' },
+        { role: 'paste', label: 'Colar' },
+        { role: 'selectAll', label: 'Selecionar Tudo' }
+      );
+    } else if (params.selectionText && params.selectionText.trim().length > 0) {
+      menuTemplate.push(
+        { role: 'copy', label: 'Copiar' },
+        { type: 'separator' },
+        {
+          label: `Pesquisar "${params.selectionText.trim().substring(0, 20)}..." no Google`,
+          click: () => {
+            openExternalSafe(`https://www.google.com/search?q=${encodeURIComponent(params.selectionText.trim())}`, 'context-menu-search');
+          },
+        }
+      );
+    }
+
+    if (params.linkURL) {
+      menuTemplate.push(
+        { type: 'separator' },
+        {
+          label: 'Abrir link no Navegador',
+          click: () => openExternalSafe(params.linkURL, 'context-menu-link'),
+        },
+        {
+          label: 'Copiar endereço do link',
+          click: () => clipboard.writeText(params.linkURL),
+        }
+      );
+    }
+
+    if (menuTemplate.length > 0) {
+      const menu = Menu.buildFromTemplate(menuTemplate);
+      menu.popup({ window });
+    }
+  });
+}
+
+// --- In-App Desktop Keyboard Shortcuts ---
+function setupDesktopShortcuts(window) {
+  window.webContents.on('before-input-event', (event, input) => {
+    // F5 or Ctrl+R (without Shift) -> Smooth feed refresh without full web reload
+    if ((input.key === 'F5' || (input.key === 'r' && (input.control || input.meta))) && !input.shift) {
+      event.preventDefault();
+      window.webContents.send('desktop:refresh-feeds');
+      return;
+    }
+
+    // Ctrl+F -> Focus global search
+    if (input.key === 'f' && (input.control || input.meta) && !input.shift && !input.alt) {
+      event.preventDefault();
+      window.webContents.send('desktop:focus-search');
+      return;
+    }
+
+    // Ctrl+, -> Open Settings modal
+    if (input.key === ',' && (input.control || input.meta)) {
+      event.preventDefault();
+      window.webContents.send('desktop:open-settings');
+      return;
+    }
+
+    // Ctrl+B -> Toggle Bookmarks
+    if (input.key === 'b' && (input.control || input.meta) && !input.shift && !input.alt) {
+      event.preventDefault();
+      window.webContents.send('desktop:toggle-bookmarks');
+      return;
+    }
+
+    // Ctrl+N -> New Dynamic Block
+    if (input.key === 'n' && (input.control || input.meta) && !input.shift && !input.alt) {
+      event.preventDefault();
+      window.webContents.send('desktop:open-create-block');
+      return;
+    }
+
+    // Ctrl+D -> Toggle Dark/Light Theme
+    if (input.key === 'd' && (input.control || input.meta) && !input.shift && !input.alt) {
+      event.preventDefault();
+      window.webContents.send('desktop:toggle-theme');
+      return;
+    }
+  });
+}
+
+// --- IPC Handlers ---
+function setupIpcHandlers() {
+  ipcMain.handle('desktop:show-notification', async (_event, options) => {
+    if (!Notification.isSupported()) return false;
+    try {
+      const { pngPath, icoPath } = getAppIconPaths();
+
+      let notifIcon = undefined;
+      if (options.icon) {
+        try {
+          const img = typeof options.icon === 'string' ? nativeImage.createFromPath(options.icon) : options.icon;
+          if (img && !img.isEmpty()) notifIcon = img;
+        } catch (_) {}
+      }
+      if (!notifIcon && pngPath && fs.existsSync(pngPath)) {
+        try {
+          const img = nativeImage.createFromPath(pngPath);
+          if (img && !img.isEmpty()) notifIcon = img;
+        } catch (_) {}
+      }
+      if (!notifIcon && icoPath && fs.existsSync(icoPath)) {
+        try {
+          const img = nativeImage.createFromPath(icoPath);
+          if (img && !img.isEmpty()) notifIcon = img;
+        } catch (_) {}
+      }
+
+      const notif = new Notification({
+        title: options.title || 'CyberKiwi',
+        body: options.body || '',
+        icon: notifIcon,
+        silent: options.silent || false,
+      });
+
+      notif.on('click', () => {
+        showAndFocusWindow();
+        if (options.article && mainWindow) {
+          mainWindow.webContents.send('desktop:navigate-to-article', options.article);
+        }
+      });
+
+      notif.show();
+      return true;
+    } catch (err) {
+      console.warn('[IPC] Show notification failed:', err);
+      return false;
+    }
+  });
+
+  ipcMain.handle('desktop:flash-frame', (_event, flag) => {
+    if (mainWindow && !mainWindow.isFocused()) {
+      mainWindow.flashFrame(Boolean(flag));
+    }
+  });
+
+  ipcMain.handle('desktop:get-auto-start', () => {
+    return autoStart.get();
+  });
+
+  ipcMain.handle('desktop:set-auto-start', (_event, enabled) => {
+    return autoStart.set(Boolean(enabled));
+  });
+
+  ipcMain.handle('desktop:get-minimize-to-tray', () => {
+    return desktopSettings.minimizeToTray;
+  });
+
+  ipcMain.handle('desktop:set-minimize-to-tray', (_event, enabled) => {
+    desktopSettings.minimizeToTray = Boolean(enabled);
+    saveDesktopSettings(desktopSettings);
+    return desktopSettings.minimizeToTray;
+  });
+
+  ipcMain.handle('desktop:check-updates', async () => {
+    try {
+      return await checkForUpdates();
+    } catch (err) {
+      console.warn('[AutoUpdater] Manual check error:', err);
+      return null;
+    }
+  });
+
+  ipcMain.handle('desktop:open-external', (_event, url) => {
+    // Renderer input is untrusted: only plain http(s) URLs reach the system browser.
+    return openExternalSafe(url, 'renderer-ipc');
+  });
+
+  // Hands the AI access token to the app's own renderer, which sends it to the bundled server.
+  ipcMain.handle('desktop:get-ai-token', () => aiAccessToken);
+}
+
+app.whenReady().then(async () => {
+  const { icoPath, pngPath, primaryIcon } = getAppIconPaths();
+  registerWindowsAumid(icoPath, pngPath);
+  registerWindowsShortcut(icoPath, pngPath);
+  refreshWindowsIconCache();
+
+  let appNativeImage = null;
+  if (primaryIcon) {
+    try {
+      appNativeImage = nativeImage.createFromPath(primaryIcon);
+    } catch (_) {}
+  }
+
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const workArea = primaryDisplay.workArea;
+  const defaultWidth = Math.min(1380, workArea.width - 40);
+  const defaultHeight = Math.min(840, workArea.height - 40);
+
+  const windowState = loadWindowState();
+  const isHidden = process.argv.includes('--hidden');
+
+  let initialWidth = windowState.width || defaultWidth;
+  let initialHeight = windowState.height || defaultHeight;
+  if (initialWidth > workArea.width) initialWidth = workArea.width;
+  if (initialHeight > workArea.height) initialHeight = workArea.height;
+
+  let initialX = windowState.x;
+  let initialY = windowState.y;
+  if (
+    initialX === undefined ||
+    initialY === undefined ||
+    initialX < workArea.x ||
+    initialY < workArea.y ||
+    initialX + 100 > workArea.x + workArea.width ||
+    initialY + 100 > workArea.y + workArea.height
+  ) {
+    initialX = undefined;
+    initialY = undefined;
+  }
+
+  // On Windows, passing the raw .ico file path gives the crispest native multi-resolution icons
+  const windowIcon = (process.platform === 'win32' && icoPath && fs.existsSync(icoPath))
+    ? icoPath
+    : (appNativeImage || primaryIcon || undefined);
+
+  mainWindow = new BrowserWindow({
+    x: initialX,
+    y: initialY,
+    width: initialWidth,
+    height: initialHeight,
+    minWidth: 940,
+    minHeight: 600,
+    center: initialX === undefined,
+    show: !isHidden,
+    autoHideMenuBar: true,
+    backgroundColor: '#0a0b0e',
+    title: 'CyberKiwi',
+    icon: windowIcon,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  if (process.platform !== 'win32' && appNativeImage && !appNativeImage.isEmpty()) {
+    try {
+      mainWindow.setIcon(appNativeImage);
+    } catch (_) {}
+  }
+
+  console.log('[Electron Main] Window created. Bounds:', mainWindow.getBounds(), 'isVisible:', mainWindow.isVisible());
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('[Electron Main] Page did-finish-load successfully!');
+  });
+  mainWindow.webContents.on('console-message', (_e, level, message) => {
+    console.log(`[Renderer Console L${level}]:`, message);
+  });
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    console.error('[Renderer Gone]:', details);
+  });
+
+  if (!isHidden) {
+    showAndFocusWindow();
+  }
+
+  if (windowState.isMaximized) {
+    mainWindow.maximize();
+  }
+
+  // Open external links in the system browser instead of inside the app
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    openExternalSafe(url, 'window-open');
+    return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!isLocalAppUrl(url)) {
+      event.preventDefault();
+      openExternalSafe(url, 'navigation');
+    }
+  });
+
+  // Track window resizing and moving for persistence
+  mainWindow.on('resize', debouncedSaveWindowState);
+  mainWindow.on('move', debouncedSaveWindowState);
+
+  mainWindow.on('focus', () => {
+    mainWindow.flashFrame(false);
+  });
+
+  // Handle minimize to tray on close
+  mainWindow.on('close', (event) => {
+    if (!isQuitting && desktopSettings.minimizeToTray && tray) {
+      event.preventDefault();
+      mainWindow.hide();
+
+      if (!hasShownTrayBalloon && tray && process.platform === 'win32') {
+        hasShownTrayBalloon = true;
+        tray.displayBalloon({
+          iconType: 'info',
+          title: 'CyberKiwi em Segundo Plano',
+          content: 'O aplicativo continua ativo na bandeja do sistema para monitorar notícias em tempo real.',
+        });
+      }
+    } else {
+      saveWindowState();
+    }
+  });
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error(`[Electron Main] Failed to load ${validatedURL}: ${errorCode} - ${errorDescription}`);
+    if (mainWindow && typeof validatedURL === 'string' && !validatedURL.startsWith('file://')) {
+      const fallbackFile = path.join(app.getAppPath(), 'dist', 'index.html');
+      mainWindow.loadFile(fallbackFile);
+    }
+  });
+
+  // Setup Windows features
+  setupContextMenu(mainWindow);
+  setupDesktopShortcuts(mainWindow);
+  setupIpcHandlers();
+
+  if (primaryIcon) {
+    createTray(primaryIcon);
+  }
+
+  // A hidden launch must stay reachable even on desktops without a tray.
+  if (isHidden && (!tray || !desktopSettings.minimizeToTray)) showAndFocusWindow();
+
+  const port = await getFreePort();
+  const appPath = app.getAppPath();
+  const distDir = path.join(appPath, 'dist');
+  process.env.DIST_PATH = distDir;
+  process.env.PORT = String(port);
+  // Per-launch secret for the bundled server's AI routes. It is never written to disk or the bundle;
+  // only this window's renderer receives it, through the desktop:get-ai-token IPC handler.
+  aiAccessToken = require('crypto').randomBytes(32).toString('hex');
+  process.env.AI_ACCESS_TOKEN = aiAccessToken;
+  // Identifies this launch's server on /health, so readiness cannot be satisfied by another process (F50).
+  instanceId = require('crypto').randomBytes(16).toString('hex');
+  process.env.APP_INSTANCE_ID = instanceId;
+
+  // Load bundled server
+  try {
+    require(path.join(distDir, 'server.cjs'));
+  } catch (err) {
+    console.error('[Electron Main] Failed to load server.cjs:', err);
+  }
+
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const isUp = await waitForServer(`${serverUrl}/health`, instanceId);
+
+  debugLog('Server URL:', serverUrl, 'isUp:', isUp);
+
+  if (mainWindow) {
+    if (isUp) {
+      debugLog('Loading serverUrl:', serverUrl);
+      mainWindow.loadURL(serverUrl);
+    } else {
+      debugLog('Fallback loading index.html');
+      mainWindow.loadURL(`file://${path.join(distDir, 'index.html')}`);
+    }
+    if (!isHidden) {
+      debugLog('Calling showAndFocusWindow after loadURL');
+      showAndFocusWindow();
+    }
+  }
+
+  setupAutoUpdater();
+});
+
+// Only AppImage supports self-updates on Linux; .deb uses manual package installation.
+function supportsAutoUpdates() {
+  return app.isPackaged && !process.env.PORTABLE_EXECUTABLE_DIR &&
+    (process.platform !== 'linux' || Boolean(process.env.APPIMAGE)) &&
+    fs.existsSync(path.join(process.resourcesPath || '', 'app-update.yml'));
+}
+
+async function checkForUpdates() {
+  if (!supportsAutoUpdates()) {
+    await shell.openExternal('https://github.com/cyberkiwi/cyberkiwi-client/releases/latest');
+    return null;
+  }
+  return autoUpdater.checkForUpdates();
+}
+
+// --- Automatic updates (electron-updater) ---
+function setupAutoUpdater() {
+  const appUpdateFile = path.join(process.resourcesPath || '', 'app-update.yml');
+  let hasAppUpdate = false;
+  try { hasAppUpdate = fs.existsSync(appUpdateFile); } catch (_) {}
+
+  if (!supportsAutoUpdates() || !hasAppUpdate) {
+    console.log('[AutoUpdater] Disabled (unpacked, portable build, or no app-update.yml)');
+    return;
+  }
+
+  const feedUrl = process.env.UPDATE_FEED_URL;
+  const ghOwner = process.env.GH_OWNER;
+  const ghRepo = process.env.GH_REPO;
+  if (feedUrl) {
+    autoUpdater.setFeedURL({ provider: 'generic', url: feedUrl });
+  } else if (ghOwner && ghRepo) {
+    if (process.env.GH_TOKEN || process.env.GITHUB_TOKEN) {
+      process.env.GH_TOKEN = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+    }
+    autoUpdater.setFeedURL({ provider: 'github', owner: ghOwner, repo: ghRepo });
+  }
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('update-downloaded', async (info) => {
+    console.log(`[AutoUpdater] Downloaded ${info.version}`);
+    const win = BrowserWindow.getAllWindows()[0];
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'info',
+      title: 'Atualização disponível',
+      message: `Nova versão ${info.version} baixada.`,
+      detail: 'Reinicie o app agora para instalar a atualização.',
+      buttons: ['Reiniciar agora', 'Depois'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) {
+      setImmediate(() => autoUpdater.quitAndInstall());
+    }
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.warn('[AutoUpdater] Error:', err?.message || err);
+  });
+
+  setTimeout(() => {
+    checkForUpdates().catch((err) => {
+      console.warn('[AutoUpdater] Check failed:', err?.message || err);
+    });
+  }, 5000);
+}
+
+app.on('before-quit', () => {
+  isQuitting = true;
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin' && (!desktopSettings.minimizeToTray || !tray || isQuitting)) {
+    app.quit();
+  }
+});
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    app.quit();
+  } else {
+    showAndFocusWindow();
+  }
+});
+

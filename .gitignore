@@ -1,0 +1,29 @@
+node_modules/
+build/
+dist/
+release/
+coverage/
+.DS_Store
+*.log
+*.zip
+*.apk
+.env*
+!.env.example
+.freebuff/
+
+/generated/prisma
+
+# Prisma generated client
+generated/
+
+# Signing material: never commit
+*.keystore
+*.jks
+*.p12
+
+# Local agent tooling and vendored skill packs (not product code)
+.agents/
+.claude/
+.windsurf/
+.impeccable/
+skills-lock.json

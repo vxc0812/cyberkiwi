@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">CyberKiwi</string>
+    <string name="title_activity_main">CyberKiwi</string>
+    <string name="package_name">com.cyberkiwi.client</string>
+    <string name="custom_url_scheme">com.cyberkiwi.client</string>
+</resources>
