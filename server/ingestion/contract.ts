@@ -1,5 +1,5 @@
 /**
- * CyberKiwi ingestion contract (version 1).
+ * CyberKiwi ingestion contract (version 2).
  *
  * Pure functions only: no network, no database. The worker and the API both
  * depend on these rules, so they are covered by tests in
@@ -7,8 +7,9 @@
  * bump INGESTION_CONTRACT_VERSION and document it in docs/ingestion-contract.md.
  */
 import { createHash } from 'crypto';
+import { normalizeAudioUrl } from '../../src/utils/fetchTarget';
 
-export const INGESTION_CONTRACT_VERSION = 1;
+export const INGESTION_CONTRACT_VERSION = 2;
 
 export const LIMITS = {
   titleMaxChars: 300,
@@ -36,6 +37,7 @@ export interface RawFeedItem {
   isoDate?: unknown;
   pubDate?: unknown;
   imageUrl?: unknown;
+  audioUrl?: unknown;
 }
 
 export interface NormalizedArticle {
@@ -47,6 +49,7 @@ export interface NormalizedArticle {
   excerpt: string | null;
   author: string | null;
   imageUrl: string | null;
+  audioUrl: string | null;
   publishedAt: Date | null;
   contentHash: string;
 }
@@ -172,6 +175,7 @@ export function normalizeItem(
       excerpt,
       author,
       imageUrl,
+      audioUrl: normalizeAudioUrl(raw.audioUrl),
       publishedAt: parsePublishedAt(raw.isoDate, raw.pubDate, now),
       contentHash: contentHashFor(title, excerpt),
     },

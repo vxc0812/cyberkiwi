@@ -55,6 +55,7 @@ export function clusterNewsItems(
       pubDate: item.pubDate,
       author: item.author,
       imageUrl: item.imageUrl,
+      audioUrl: item.audioUrl,
       contentSnippet: item.contentSnippet,
       contentHtml: item.contentHtml,
     };
@@ -193,6 +194,7 @@ export function clusterNewsItems(
         pubDate: item.pubDate,
         author: item.author,
         imageUrl: item.imageUrl,
+        audioUrl: item.audioUrl,
         contentSnippet: item.contentSnippet,
         contentHtml: item.contentHtml,
       });
@@ -304,6 +306,7 @@ function addArticleToCluster(cluster: InternalCluster, item: NewsItem, feat: Art
       pubDate: item.pubDate,
       author: item.author,
       imageUrl: item.imageUrl,
+      audioUrl: item.audioUrl,
       contentSnippet: item.contentSnippet,
       contentHtml: item.contentHtml,
     });

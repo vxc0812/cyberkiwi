@@ -50,6 +50,7 @@ export interface NewsItem {
   sourceCategory: string;
   author?: string;
   imageUrl?: string;
+  audioUrl?: string;
   sentiment?: Sentiment;
   isRead?: boolean;
   isBookmarked?: boolean;
@@ -112,6 +113,7 @@ export interface ClusterSource {
   pubDate: string;
   author?: string;
   imageUrl?: string;
+  audioUrl?: string;
   contentSnippet: string;
   contentHtml?: string;
 }

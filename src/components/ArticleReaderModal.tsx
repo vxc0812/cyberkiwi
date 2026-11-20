@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { normalizeExternalUrl } from '../utils/externalUrl';
+import { normalizeAudioUrl } from '../utils/fetchTarget';
 import {
   X,
   ExternalLink,
@@ -221,6 +222,7 @@ export const ArticleReaderModal: React.FC<ArticleReaderModalProps> = ({
   const displayAuthor = currentSource ? currentSource.author : article?.author;
   const displayPubDate = currentSource ? currentSource.pubDate : article?.pubDate || '';
   const displayImage = currentSource?.imageUrl || article?.imageUrl;
+  const audioUrl = normalizeAudioUrl(currentSource ? currentSource.audioUrl : article?.audioUrl);
 
   // Auto-fetch full article when viewMode is 'full'
   useEffect(() => {
@@ -648,6 +650,17 @@ export const ArticleReaderModal: React.FC<ArticleReaderModalProps> = ({
                 })}
               </div>
             </div>
+          )}
+
+          {audioUrl && (
+            <audio
+              key={audioUrl}
+              aria-label={language === 'pt' ? 'Reproduzir episódio' : 'Play episode'}
+              className="w-full"
+              controls
+              preload="none"
+              src={audioUrl}
+            />
           )}
 
           {/* Article Image Banner */}

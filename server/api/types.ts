@@ -51,6 +51,7 @@ export interface ArticleRef {
   excerpt: string | null;
   author: string | null;
   imageUrl: string | null;
+  audioUrl?: string | null;
   publishedAt: string | null;
   firstSeenAt: string;
   source: SourceRef;

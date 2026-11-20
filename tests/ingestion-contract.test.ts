@@ -201,6 +201,17 @@ async function main() {
     assert.equal(a.publishedAt?.toISOString(), '2026-11-12T08:00:00.000Z');
   });
 
+  await check('parse: podcast audio survives normalization and is not used as artwork', async () => {
+    const parsed = await parseFeedXml(fixture.replace(
+      /<enclosure[^>]+>/,
+      '<enclosure url="https://127.0.0.1/episode.mp3" type="audio/mpeg"/>' +
+      '<enclosure url="https://cdn.example.test/episode.mp3?ref=player&amp;token=abc" type="audio/mpeg"/>',
+    ));
+    const [episode] = normalizeBatch(parsed.items, FEED_ID, NOW).articles;
+    assert.equal(episode.imageUrl, null);
+    assert.equal(episode.audioUrl, 'https://cdn.example.test/episode.mp3?ref=player&token=abc');
+  });
+
   await check('fetch: refuses private targets before any connection', async () => {
     await assert.rejects(fetchFeedXml('http://127.0.0.1:9/feed.xml'), /Private IP addresses not allowed/);
     await assert.rejects(fetchFeedXml('http://169.254.169.254/latest/meta-data/'), /Private IP addresses not allowed/);

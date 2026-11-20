@@ -1,6 +1,6 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { NewsItem, RssFeed } from '../types';
-import { normalizeFetchTarget } from '../utils/fetchTarget';
+import { normalizeAudioUrl, normalizeFetchTarget } from '../utils/fetchTarget';
 import { aiAuthHeaders } from '../utils/aiAuth';
 import { apiFetch, getApiBaseUrl } from './apiClient';
 import { nativeAiMode } from './aiPolicy';
@@ -169,6 +169,8 @@ async function parseRssClientSide(input: string): Promise<NewsItem[]> {
       item.querySelector('id')?.textContent?.trim() ||
       link;
     const imageUrl = extractImageFromXmlItem(item, url);
+    const enclosure = item.querySelector('enclosure[type^="audio/"], link[rel="enclosure"][type^="audio/"]');
+    const audioUrl = normalizeAudioUrl(enclosure?.getAttribute('url') ?? enclosure?.getAttribute('href'));
 
     // Simple sentiment analyzer
     const lower = `${title} ${cleanSnippet}`.toLowerCase();
@@ -189,6 +191,7 @@ async function parseRssClientSide(input: string): Promise<NewsItem[]> {
       sourceId: url,
       sourceCategory: 'custom',
       imageUrl,
+      audioUrl: audioUrl ?? undefined,
       sentiment,
       isBreaking: /urgente|bomba|breaking|alerta/i.test(title),
     };

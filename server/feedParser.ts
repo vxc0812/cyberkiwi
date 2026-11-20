@@ -12,6 +12,7 @@
  *
  * The output uses the field names rss-parser produced, so consumers do not change.
  */
+import { normalizeAudioUrl } from '../src/utils/fetchTarget';
 import { SaxesParser } from 'saxes';
 
 export interface FeedLimits {
@@ -61,6 +62,16 @@ export interface ParsedItem {
   thumb?: string;
   ogImage?: string;
   twitterImage?: string;
+}
+
+/** Finds a playable enclosure without treating it as artwork. */
+export function podcastAudioFrom(item: ParsedItem): string | undefined {
+  for (const enclosure of item.enclosure) {
+    if (!enclosure.type?.toLowerCase().startsWith('audio/')) continue;
+    const url = normalizeAudioUrl(enclosure.url ?? enclosure.href);
+    if (url) return url;
+  }
+  return undefined;
 }
 
 export interface ParsedFeed {
@@ -228,7 +239,7 @@ export function parseFeedBounded(xml: string, limits: FeedLimits = DEFAULT_FEED_
     }
 
     const p = item;
-    if (name === 'enclosure') {
+    if (name === 'enclosure' || (name === 'link' && attrs.rel === 'enclosure')) {
       p.enclosure.push(mediaOf(attrs, short));
     } else if (name === 'media:content') {
       p.mediaContent.push(mediaOf(attrs, short));

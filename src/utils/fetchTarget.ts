@@ -19,3 +19,9 @@ export function normalizeFetchTarget(value: unknown): string | null {
   if ((isIPv4Literal(host) || isIPv6Literal(host)) && isPrivateAddress(host)) return null;
   return url;
 }
+
+/** Podcast audio loads directly in the player, over HTTPS. */
+export function normalizeAudioUrl(value: unknown): string | null {
+  const url = normalizeFetchTarget(value);
+  return url?.startsWith('https://') ? url : null;
+}

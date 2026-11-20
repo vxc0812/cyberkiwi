@@ -1,4 +1,4 @@
-# Ingestion contract (Phase 1, version 1)
+# Ingestion contract (version 2)
 
 This document defines how CyberKiwi fetches, normalizes and stores feed data. It is the contract between the ingestion worker, the database schema (`prisma/schema.prisma`), and the read API that clients will use. Rules are implemented in `server/ingestion/contract.ts` and tested in `tests/ingestion-contract.test.ts`. Changing a rule means bumping `INGESTION_CONTRACT_VERSION` and updating this file.
 
@@ -36,10 +36,11 @@ Applied per item, in this order. Items that fail are rejected with a reason and 
 4. **Excerpt** is the first non-empty of content snippet, summary, or description. Capped at 500 characters.
 5. **Publish date** comes from `isoDate`, then `pubDate`. Invalid dates and dates more than 24 hours in the future become `null`. A missing date never rejects an item.
 6. **Image URL** is kept only if it is a valid `http(s)` URL. It is not fetched during ingestion.
+7. **Podcast audio** comes from a typed audio enclosure with an allowed public HTTPS URL. The URL retains its query parameters for playback and is not fetched by the worker.
 
 **Canonical URL**: lowercase host; no fragment; tracking parameters removed (`utm_*`, `fbclid`, `gclid`, `mc_cid`, `mc_eid`, `ref`, `ref_src`, `igshid`); remaining parameters sorted; default port removed; trailing slash removed except on the root path.
 
-**Content hash**: first 32 hex characters of SHA-256 over the lowercased, whitespace-collapsed title and excerpt. A changed hash on a known identity means the article was updated.
+**Content hash**: first 32 hex characters of SHA-256 over the lowercased, whitespace-collapsed title and excerpt. A changed hash or audio URL on a known identity updates the stored article.
 
 ## 4. Batch rules
 

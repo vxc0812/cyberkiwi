@@ -5,7 +5,7 @@
  * add a second fetch implementation here: the SSRF, redirect and size protections
  * live only in that shared path.
  */
-import { parseFeedBounded } from '../feedParser';
+import { parseFeedBounded, podcastAudioFrom } from '../feedParser';
 import { safeFetchText } from '../netSafety';
 import type { RawFeedItem } from './contract';
 import { adapterFor, feedPolicyFor, feedTooLargeMessage } from './catalogPolicy';
@@ -81,6 +81,7 @@ export async function parseFeedXml(xml: string): Promise<{ title: string | null;
     isoDate: item.isoDate,
     pubDate: item.pubDate,
     imageUrl: imageFrom(item),
+    audioUrl: podcastAudioFrom(item),
   }));
   return { title: feed.title ?? null, items };
 }
@@ -90,6 +91,7 @@ function imageFrom(item: any): string | undefined {
   const thumb = Array.isArray(item.mediaThumbnail) ? item.mediaThumbnail : [];
   const enclosure = Array.isArray(item.enclosure) ? item.enclosure : item.enclosure ? [item.enclosure] : [];
   const candidates = [...media, ...thumb, ...enclosure]
+    .filter((m) => !String(m?.type ?? m?.$?.type ?? '').toLowerCase().startsWith('audio/'))
     .map((m: any) => m?.$?.url ?? m?.url)
     .filter((u: unknown): u is string => typeof u === 'string');
   return candidates[0];

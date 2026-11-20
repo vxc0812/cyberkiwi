@@ -193,14 +193,14 @@ export async function upsertArticles(
   const externalIds = articles.map((a) => a.externalId);
   const existing = await db.article.findMany({
     where: { feedId, externalId: { in: externalIds } },
-    select: { id: true, externalId: true, contentHash: true },
+    select: { id: true, externalId: true, contentHash: true, audioUrl: true },
   });
   const existingByExternal = new Map(existing.map((row) => [row.externalId, row]));
 
   const toCreate = articles.filter((a) => !existingByExternal.has(a.externalId));
   const toUpdate = articles.filter((a) => {
     const row = existingByExternal.get(a.externalId);
-    return row !== undefined && row.contentHash !== a.contentHash;
+    return row !== undefined && (row.contentHash !== a.contentHash || row.audioUrl !== a.audioUrl);
   });
 
   let inserted = 0;
@@ -253,6 +253,7 @@ function toArticleData(feedId: string, a: NormalizedArticle, now: Date) {
     excerpt: a.excerpt,
     author: a.author,
     imageUrl: a.imageUrl,
+    audioUrl: a.audioUrl,
     publishedAt: a.publishedAt,
     sortAt: a.publishedAt ?? now,
     contentHash: a.contentHash,

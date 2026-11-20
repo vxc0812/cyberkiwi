@@ -1,6 +1,6 @@
 import express, { Request, Response as ExpressResponse, NextFunction } from 'express';
 import path from 'path';
-import { parseFeedBounded, stripTags } from './server/feedParser';
+import { parseFeedBounded, podcastAudioFrom, stripTags } from './server/feedParser';
 import { BYOK_HEADER, configuredAiToken, isWellFormedGeminiKey, requireAiCaller, type AiCaller } from './server/aiGuard';
 import { asRoute, handleCurate, handleSummarize, handleTranslate, handleValidateKey } from './server/aiRoutes';
 import { attachSession, principalOf } from './server/auth/middleware';
@@ -369,6 +369,7 @@ const handleRssRequest = async (req: Request, res: ExpressResponse) => {
               sourceCategory: 'general',
               author: item.creator || item.author || sourceTitle,
               imageUrl,
+              audioUrl: podcastAudioFrom(item),
               sentiment: calculateSentiment((item.title || '') + ' ' + cleanSnippet),
               contentHash: contentHash(item.title + ' ' + rawSnippet),
             };

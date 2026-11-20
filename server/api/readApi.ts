@@ -133,6 +133,7 @@ type ArticleWithFeed = {
   excerpt: string | null;
   author: string | null;
   imageUrl: string | null;
+  audioUrl: string | null;
   publishedAt: Date | null;
   firstSeenAt: Date;
   sortAt: Date;
@@ -170,6 +171,7 @@ export function articleView(a: ArticleWithFeed): ArticleRef {
     excerpt: a.excerpt,
     author: a.author,
     imageUrl: a.imageUrl,
+    audioUrl: a.audioUrl,
     publishedAt: iso(a.publishedAt),
     firstSeenAt: a.firstSeenAt.toISOString(),
     source: {
@@ -351,6 +353,7 @@ const articleSelect = {
   },
   author: true,
   imageUrl: true,
+  audioUrl: true,
   publishedAt: true,
   firstSeenAt: true,
   sortAt: true,

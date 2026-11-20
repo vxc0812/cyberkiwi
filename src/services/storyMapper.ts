@@ -22,6 +22,7 @@ export function articleToNewsItem(a: ArticleRef): NewsItem {
     sourceCategory: a.source.category,
     author: a.author ?? undefined,
     imageUrl: a.imageUrl ?? undefined,
+    audioUrl: a.audioUrl ?? undefined,
   };
 }
 
@@ -39,6 +40,7 @@ function sourcesOf(items: NewsItem[]): ClusterSource[] {
       pubDate: item.pubDate,
       author: item.author,
       imageUrl: item.imageUrl,
+      audioUrl: item.audioUrl,
       contentSnippet: item.contentSnippet,
     });
   }

@@ -83,6 +83,7 @@ model Article {
   excerpt      String?
   author       String?
   imageUrl     String?
+  audioUrl     String?
   language     String?
   publishedAt  DateTime?
   contentHash  String
