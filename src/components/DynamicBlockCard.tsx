@@ -33,6 +33,7 @@ interface DynamicBlockCardProps {
   /** Which empty message to show: no matches, no active sources, or all sources failing. */
   emptyKey?: 'noArticles' | 'noSources' | 'sourcesFailing';
   isLoading: boolean;
+  focused?: boolean;
   onRefreshBlock: () => void;
   onSelectArticle: (item: NewsItem) => void;
   onToggleBookmark: (item: NewsItem) => void;
@@ -54,6 +55,7 @@ export const DynamicBlockCard: React.FC<DynamicBlockCardProps> = ({
   items,
   emptyKey = 'noArticles',
   isLoading,
+  focused = false,
   onRefreshBlock,
   onSelectArticle,
   onToggleBookmark,
@@ -77,6 +79,7 @@ export const DynamicBlockCard: React.FC<DynamicBlockCardProps> = ({
   const t = getTranslation(language);
 
   const displayItems = items.slice(0, block.itemCount);
+  const articleLayout = focused && block.layout === 'ticker' ? 'grid' : block.layout;
 
   const handleArticleCardKeyDown = (event: React.KeyboardEvent<HTMLElement>, item: NewsItem) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -720,7 +723,7 @@ export const DynamicBlockCard: React.FC<DynamicBlockCardProps> = ({
             )}
 
             {/* GRID LAYOUT */}
-            {block.layout === 'grid' && (
+            {articleLayout === 'grid' && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
                 {displayItems.map((item, idx) => {
                   const source = getSourceBadge(item.sourceName);
@@ -829,7 +832,7 @@ export const DynamicBlockCard: React.FC<DynamicBlockCardProps> = ({
 
             {/* LIST LAYOUT */}
             {block.layout === 'list' && (
-              <div className="space-y-2.5">
+              <div className={focused ? 'grid gap-2.5 lg:grid-cols-2' : 'space-y-2.5'}>
                 {displayItems.map((item) => (
                   <div
                     key={item.id}
@@ -909,9 +912,9 @@ export const DynamicBlockCard: React.FC<DynamicBlockCardProps> = ({
 
             {/* COMPACT LAYOUT */}
             {block.layout === 'compact' && (
-              <div className={`divide-y ${
-                theme === 'dark' ? 'divide-zinc-800/40' : 'divide-neutral-200'
-              }`}>
+              <div className={focused
+                ? 'grid gap-x-5 gap-y-1 lg:grid-cols-2'
+                : `divide-y ${theme === 'dark' ? 'divide-zinc-800/40' : 'divide-neutral-200'}`}>
                 {displayItems.map((item) => (
                   <div
                     key={item.id}
@@ -979,7 +982,7 @@ export const DynamicBlockCard: React.FC<DynamicBlockCardProps> = ({
             )}
 
             {/* TICKER LAYOUT */}
-            {block.layout === 'ticker' && (
+            {articleLayout === 'ticker' && (
               <div className="flex gap-3 overflow-x-auto no-scrollbar py-1">
                 {displayItems.map((item) => (
                   <div

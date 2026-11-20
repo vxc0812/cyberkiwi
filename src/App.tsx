@@ -1508,8 +1508,8 @@ export default function App() {
           )
         ) : readGate !== 'signed_out' || allNewsItems.length > 0 || showArchiveOnly ? (
           /* Dynamic Blocks Layout Grid */
-          <div className={`grid grid-cols-1 ${settings.layoutCols === 1
-              ? 'lg:grid-cols-1'
+          <div className={`grid grid-cols-1 ${selectedCategory !== 'all' || settings.layoutCols === 1
+              ? ''
               : settings.layoutCols === 2
                 ? 'lg:grid-cols-2'
                 : 'lg:grid-cols-3'
@@ -1520,6 +1520,7 @@ export default function App() {
                 <DynamicBlockCard
                   key={block.id}
                   block={block}
+                  focused={selectedCategory !== 'all'}
                   items={blockItems}
                   emptyKey={emptyKeyForBlock(block)}
                   isLoading={isRefreshing}
