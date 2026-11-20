@@ -1357,6 +1357,28 @@ export default function App() {
       {/* Main Content Dashboard */}
       <main className="max-w-[1680px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 
+        {readGate === 'signed_out' && !showBookmarksOnly && !showArchiveOnly && (
+          <section className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-amber-500/40 bg-amber-500/10 p-4">
+            <p className="text-sm">
+              {settings.language === 'pt'
+                ? 'Entre para ler as notícias. O acesso à versão de testes é por convite.'
+                : 'Sign in to read stories. Pre-beta access is by invitation.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => setIsSettingsOpen(true)}
+              className="cursor-pointer rounded-control bg-amber-500 px-3 py-2 text-sm font-bold text-black hover:bg-amber-400"
+            >
+              {settings.language === 'pt' ? 'Abrir configurações da conta' : 'Open account settings'}
+            </button>
+          </section>
+        )}
+        {readGate === 'ready' && apiStatus.state === 'error' && (
+          <p role="status" className="rounded-card border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
+            {describeApiError(apiStatus.code ?? 'unknown')}
+          </p>
+        )}
+
         {/* Archive View Header Banner */}
         {showArchiveOnly && (
           <div className="p-4 rounded-hero bg-amber-500/10 border border-amber-500/40 flex flex-wrap items-center justify-between gap-4 shadow-lg">
@@ -1518,20 +1540,15 @@ export default function App() {
           </div>
         </footer>
 
-        {apiClient && (
+        {apiClient && storiesHasMore && (
           <div className="flex flex-col items-center gap-2 py-4">
-            {apiStatus.state === 'error' && (
-              <span className="text-sm text-amber-400">{describeApiError(apiStatus.code ?? 'unknown')}</span>
-            )}
-            {storiesHasMore && (
-              <button
-                type="button"
-                onClick={() => void loadMoreStories()}
-                className="px-4 py-2 rounded-control border text-sm font-bold border-neutral-700 hover:border-neutral-500 transition-colors"
-              >
-                {settings.language === 'en' ? 'Load more stories' : 'Carregar mais histórias'}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => void loadMoreStories()}
+              className="px-4 py-2 rounded-control border text-sm font-bold border-neutral-700 hover:border-neutral-500 transition-colors"
+            >
+              {settings.language === 'en' ? 'Load more stories' : 'Carregar mais histórias'}
+            </button>
           </div>
         )}
       </main>

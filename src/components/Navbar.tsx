@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Rss,
   RefreshCw,
   Plus,
   Bookmark,
@@ -181,9 +180,15 @@ export const Navbar: React.FC<NavbarProps> = ({
           
           {/* Brand Logo */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            <div className={`flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-control ${acc.bg} text-black shadow-md font-black`}>
-              <Rss className="w-4 h-4 sm:w-5 sm:h-5 animate-pulse" />
-            </div>
+            <span
+              aria-hidden="true"
+              className="size-8 sm:size-9 rounded-control bg-[#f7f2e3] bg-no-repeat shadow-md"
+              style={{
+                backgroundImage: 'url(/cyberkiwi-logo.jpeg)',
+                backgroundSize: '275% auto',
+                backgroundPosition: 'center 24%',
+              }}
+            />
             <div className="flex items-center gap-1.5">
               <span className={`font-black text-base sm:text-xl tracking-tight flex items-center ${
                 settings.theme === 'dark' ? 'text-neutral-100' : 'text-neutral-900'
