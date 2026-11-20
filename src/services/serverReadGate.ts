@@ -9,11 +9,13 @@
  *   restoring   the session is still being restored (cookie check, or native token refresh)
  *   signed_out  restoration finished and nobody is signed in
  *   ready       a user is signed in; protected reads may run
+ *   guest       the local development server allows guest reads
  */
-export type ServerReadGate = 'local' | 'restoring' | 'signed_out' | 'ready';
+export type ServerReadGate = 'local' | 'restoring' | 'signed_out' | 'ready' | 'guest';
 
-export function serverReadGate(apiConfigured: boolean, authLoading: boolean, userId: string | null): ServerReadGate {
+export function serverReadGate(apiConfigured: boolean, authLoading: boolean, userId: string | null, localGuest = false): ServerReadGate {
   if (!apiConfigured) return 'local';
+  if (localGuest) return 'guest';
   if (authLoading) return 'restoring';
   return userId ? 'ready' : 'signed_out';
 }
@@ -24,5 +26,6 @@ export function serverReadGate(apiConfigured: boolean, authLoading: boolean, use
  * sign-out, or after another user signs in, is dropped. Null whenever reads are not allowed.
  */
 export function readerKey(gate: ServerReadGate, userId: string | null): string | null {
+  if (gate === 'guest') return 'localhost-guest';
   return gate === 'ready' && userId ? userId : null;
 }

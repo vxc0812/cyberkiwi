@@ -133,9 +133,12 @@ export default function App() {
     }
   });
   // --- CyberKiwi server (optional): stories are built on the server when configured ---
+  const localGuest = (import.meta as any).env?.VITE_CYBERKIWI_LOCAL_GUEST === 'true'
+    && !isNativePlatform()
+    && ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
   const apiClient = useMemo<CyberkiwiApiClient | null>(() => {
     try {
-      const base = configuredApiBaseUrl((import.meta as any).env ?? {}, isNativePlatform());
+      const base = localGuest ? '' : configuredApiBaseUrl((import.meta as any).env ?? {}, isNativePlatform());
       // Story and article reads require sign-in, so requests carry the session (see authedFetchUrl).
       return base === null ? null : createCyberkiwiApiClient({ baseUrl: base, fetchImpl: authedFetchUrl });
     } catch (err) {
@@ -143,12 +146,12 @@ export default function App() {
       console.error('[CyberKiwi API] disabled:', (err as Error).message);
       return null;
     }
-  }, []);
+  }, [localGuest]);
   // Stored stories and articles require sign-in: reads wait for session restore, are skipped while
   // signed out, and run again when the signed-in user changes (see serverReadGate.ts).
   const { user: authUser, isLoading: authLoading } = useAuth();
   const authUserId = authUser?.id ?? null;
-  const readGate = serverReadGate(apiClient !== null, authLoading, authUserId);
+  const readGate = serverReadGate(apiClient !== null, authLoading, authUserId, localGuest);
   const currentReaderKey = readerKey(readGate, authUserId);
   // Read inside async callbacks to drop answers that belong to a reader who is no longer current.
   const readerKeyRef = useRef<string | null>(currentReaderKey);
@@ -311,7 +314,8 @@ export default function App() {
   const [isManageFeedsOpen, setIsManageFeedsOpen] = useState<boolean>(false);
   const [isGlobalFeedsOpen, setIsGlobalFeedsOpen] = useState<boolean>(false);
   const [isAICuratorOpen, setIsAICuratorOpen] = useState<boolean>(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [settingsView, setSettingsView] = useState<'settings' | 'account' | null>(null);
+  const isSettingsOpen = settingsView !== null;
   const [generatingAiBlockId, setGeneratingAiBlockId] = useState<string | null>(null);
 
   // Persistence Effects
@@ -689,7 +693,7 @@ export default function App() {
     });
 
     const unsubSettings = window.electronAPI.onOpenSettings(() => {
-      setIsSettingsOpen(true);
+      setSettingsView('settings');
     });
 
     const unsubSearch = window.electronAPI.onFocusSearch(() => {
@@ -741,7 +745,7 @@ export default function App() {
         if (state.selectedArticle) {
           setSelectedArticle(null);
         } else if (state.isSettingsOpen) {
-          setIsSettingsOpen(false);
+          setSettingsView(null);
         } else if (state.isCreateBlockOpen) {
           setIsCreateBlockOpen(false);
         } else if (state.isManageFeedsOpen) {
@@ -771,7 +775,7 @@ export default function App() {
           }
         } else if (e.key === ',') {
           e.preventDefault();
-          setIsSettingsOpen((prev) => !prev);
+          setSettingsView((prev) => prev ? null : 'settings');
         } else if (e.key.toLowerCase() === 'b' && !isInput) {
           e.preventDefault();
           setShowBookmarksOnly((prev) => !prev);
@@ -835,7 +839,7 @@ export default function App() {
       } else if (state.isAICuratorOpen) {
         setIsAICuratorOpen(false);
       } else if (state.isSettingsOpen) {
-        setIsSettingsOpen(false);
+        setSettingsView(null);
       } else if (state.showBookmarksOnly) {
         setShowBookmarksOnly(false);
       } else if (state.showArchiveOnly) {
@@ -1251,7 +1255,7 @@ export default function App() {
       setFeeds(CYBERSEC_DEFAULT_FEEDS);
       localStorage.removeItem(STORAGE_KEYS.BLOCKS);
       localStorage.removeItem(STORAGE_KEYS.FEEDS);
-      setIsSettingsOpen(false);
+      setSettingsView(null);
       fetchAllFeeds();
     }
   };
@@ -1272,6 +1276,18 @@ export default function App() {
       setShowBookmarksOnly(false);
       setShowArchiveOnly(false);
     }
+  };
+
+  const goHome = () => {
+    handleSelectCategory('all');
+    setSearchQuery('');
+    setDebouncedSearchQuery('');
+    setPendingStoryId(null);
+    setSelectedArticle(null);
+    if (window.location.pathname !== '/' || window.location.search || window.location.hash) {
+      window.history.replaceState(null, '', '/');
+    }
+    window.scrollTo(0, 0);
   };
 
   return (
@@ -1298,7 +1314,10 @@ export default function App() {
         onOpenManageFeeds={() => setIsManageFeedsOpen(true)}
         onOpenGlobalFeeds={() => setIsGlobalFeedsOpen(true)}
         onOpenAICurator={() => setIsAICuratorOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenSettings={() => setSettingsView('settings')}
+        onOpenAccount={() => setSettingsView('account')}
+        onHome={goHome}
+        signedIn={authUser !== null}
         onToggleBookmarks={() => {
           setShowBookmarksOnly(!showBookmarksOnly);
           setShowArchiveOnly(false);
@@ -1366,14 +1385,14 @@ export default function App() {
             </p>
             <button
               type="button"
-              onClick={() => setIsSettingsOpen(true)}
+              onClick={() => setSettingsView('account')}
               className="cursor-pointer rounded-control bg-amber-500 px-3 py-2 text-sm font-bold text-black hover:bg-amber-400"
             >
-              {settings.language === 'pt' ? 'Abrir configurações da conta' : 'Open account settings'}
+              {settings.language === 'pt' ? 'Entrar' : 'Sign in'}
             </button>
           </section>
         )}
-        {readGate === 'ready' && apiStatus.state === 'error' && (
+        {(readGate === 'ready' || readGate === 'guest') && apiStatus.state === 'error' && (
           <p role="status" className="rounded-card border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
             {describeApiError(apiStatus.code ?? 'unknown')}
           </p>
@@ -1487,7 +1506,7 @@ export default function App() {
               ))}
             </div>
           )
-        ) : (
+        ) : readGate !== 'signed_out' || allNewsItems.length > 0 || showArchiveOnly ? (
           /* Dynamic Blocks Layout Grid */
           <div className={`grid grid-cols-1 ${settings.layoutCols === 1
               ? 'lg:grid-cols-1'
@@ -1525,20 +1544,16 @@ export default function App() {
               );
             })}
           </div>
-        )}
+        ) : null}
 
-        {/* Bento Grid System Log Footer Bar */}
-        <footer className={`rounded-card p-3 border flex items-center gap-3 text-sm ${settings.theme === 'dark'
+        {/* Dashboard status */}
+        {readGate !== 'signed_out' && <footer className={`rounded-card p-3 border flex items-center gap-3 text-sm ${settings.theme === 'dark'
             ? 'bg-neutral-900/80 border-neutral-800 text-neutral-400'
             : 'bg-neutral-200/60 border-neutral-300 text-neutral-700'
           }`}>
-          <span className={`text-sm font-black ${getAccent(settings.accentColor).bg} text-black px-1.5 py-0.5 rounded`}>
-            LIVE
-          </span>
-          <div className="overflow-hidden whitespace-nowrap text-ellipsis flex-1">
-            <span className={`${getAccent(settings.accentColor).text} font-bold`}>[CyberKiwi engine v0.2.0]</span> {apiClient && serverStories ? <>Server stories ({serverStories.length} loaded)</> : <>Syncing {feeds.filter(f => f.active).length} active feeds...</>} <span className="text-emerald-400">Online</span> • {allNewsItems.length} articles loaded • Engine: <span className={`${settings.theme === 'dark' ? 'text-white' : 'text-neutral-900'} font-bold`}>Bento Real-time Matrix</span>
-          </div>
-        </footer>
+          <span>{allNewsItems.length} {settings.language === 'pt' ? 'artigos' : 'articles'}</span>
+          {lastUpdated && <span>{settings.language === 'pt' ? 'Atualizado' : 'Updated'} {lastUpdated.toLocaleTimeString()}</span>}
+        </footer>}
 
         {apiClient && storiesHasMore && (
           <div className="flex flex-col items-center gap-2 py-4">
@@ -1623,7 +1638,8 @@ export default function App() {
       {/* Settings Modal */}
       <SettingsModal
         isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
+        accountOnly={settingsView === 'account'}
+        onClose={() => setSettingsView(null)}
         settings={settings}
         onUpdateSettings={setSettings}
         onResetToDefaults={handleResetToDefaults}

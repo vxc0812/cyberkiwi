@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   RefreshCw,
   Plus,
+  LogIn,
+  UserRound,
+  ChevronDown,
   Bookmark,
   Settings,
   Sparkles,
@@ -28,6 +31,9 @@ interface NavbarProps {
   onOpenGlobalFeeds: () => void;
   onOpenAICurator: () => void;
   onOpenSettings: () => void;
+  onOpenAccount: () => void;
+  onHome: () => void;
+  signedIn: boolean;
   onToggleBookmarks: () => void;
   showBookmarksOnly: boolean;
   bookmarkCount: number;
@@ -54,6 +60,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenGlobalFeeds,
   onOpenAICurator,
   onOpenSettings,
+  onOpenAccount,
+  onHome,
+  signedIn,
   onToggleBookmarks,
   showBookmarksOnly,
   bookmarkCount,
@@ -77,14 +86,15 @@ export const Navbar: React.FC<NavbarProps> = ({
   useEffect(() => {
     if (!moreOpen) return;
     const items = (): HTMLElement[] =>
-      Array.from(moreMenuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+      Array.from(moreMenuRef.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? []);
     items()[0]?.focus();
     const close = () => {
       setMoreOpen(false);
       moreTriggerRef.current?.focus();
     };
     const handlePointerDown = (event: PointerEvent) => {
-      if (!moreMenuRef.current?.contains(event.target as Node)) setMoreOpen(false);
+      const target = event.target as Node;
+      if (!moreMenuRef.current?.contains(target) && !moreTriggerRef.current?.contains(target)) setMoreOpen(false);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -123,10 +133,17 @@ export const Navbar: React.FC<NavbarProps> = ({
   const acc = getAccent(settings.accentColor);
   const t = getTranslation(settings.language);
 
+  const accountLabel = settings.language === 'pt'
+    ? (signedIn ? 'Conta' : 'Entrar')
+    : (signedIn ? 'Account' : 'Sign in');
   const categoryTabs = [
+    { id: 'all', label: 'Overview' },
+    { id: 'news', label: 'News' },
     { id: 'vulnerabilities', label: 'Vulnerabilities' },
     { id: 'vendor-advisories', label: 'Vendor advisories' },
     { id: 'threat-intel', label: 'Threat intel' },
+  ];
+  const moreTopics = [
     { id: 'exploits', label: 'Exploits' },
     { id: 'malware', label: 'Malware' },
     { id: 'cloud', label: 'Cloud' },
@@ -136,10 +153,19 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'cert', label: 'CERT' },
     { id: 'bugbounty', label: 'Bug bounty' },
     { id: 'iot', label: 'IoT' },
-  ];
-  const moreTopics = [
-    { id: 'all', label: 'News' },
     { id: 'podcasts', label: 'Podcasts' },
+  ];
+  const selectedMoreTopic = moreTopics.find((topic) => topic.id === selectedCategory);
+  const utilityClass = `flex items-center gap-2 rounded-control px-3 py-2 text-sm font-medium transition-colors hover:bg-amber-500/10 focus-visible:outline-2 focus-visible:outline-amber-500 ${settings.theme === 'dark' ? 'text-neutral-200' : 'text-neutral-800'}`;
+  const tools = [
+    { label: t.nav.newBlock, icon: Plus, action: onOpenCreateBlock },
+    { label: t.nav.aiCurator, icon: Sparkles, action: onOpenAICurator },
+    { label: t.nav.manageFeeds, icon: ListPlus, action: onOpenManageFeeds },
+    { label: t.nav.globalDirectory, icon: Globe, action: onOpenGlobalFeeds },
+    { label: `${t.nav.bookmarks} (${bookmarkCount})`, icon: Bookmark, action: onToggleBookmarks, pressed: showBookmarksOnly },
+    { label: `${t.nav.archive} (${archivedCount})`, icon: Archive, action: onToggleArchive, pressed: showArchiveOnly },
+    { label: settings.language === 'pt' ? 'English' : 'Português (BR)', icon: Globe, action: () => onUpdateSettings({ ...settings, language: settings.language === 'pt' ? 'en' : 'pt' }) },
+    { label: settings.theme === 'dark' ? t.settings.themeLight : t.settings.themeDark, icon: settings.theme === 'dark' ? Sun : Moon, action: () => onUpdateSettings({ ...settings, theme: settings.theme === 'dark' ? 'light' : 'dark' }) },
   ];
 
   // Countdown timer for next auto refresh
@@ -162,11 +188,6 @@ export const Navbar: React.FC<NavbarProps> = ({
     return () => clearInterval(timer);
   }, [autoRefreshSec, onRefreshAll]);
 
-  const toggleTheme = () => {
-    const next = settings.theme === 'dark' ? 'light' : 'dark';
-    onUpdateSettings({ ...settings, theme: next });
-  };
-
   return (
     <header className={`sticky top-0 z-40 border-b transition-colors duration-200 ${
       settings.theme === 'dark'
@@ -178,28 +199,29 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Top Bar Row */}
         <div className="flex items-center justify-between h-14 sm:h-16 gap-2 sm:gap-4">
           
-          {/* Brand Logo */}
-          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <a
+            href="/"
+            aria-label="CyberKiwi home"
+            onClick={(event) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              event.preventDefault();
+              setMobileMenuOpen(false);
+              setMoreOpen(false);
+              onHome();
+            }}
+            className="flex shrink-0 items-center gap-2 rounded-control focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-amber-500"
+          >
             <span
               aria-hidden="true"
-              className="size-8 sm:size-9 rounded-control bg-[#f7f2e3] bg-no-repeat shadow-md"
+              className="size-8 rounded-control bg-[#f7f2e3] bg-no-repeat sm:size-9"
               style={{
                 backgroundImage: 'url(/cyberkiwi-logo.jpeg)',
                 backgroundSize: '275% auto',
                 backgroundPosition: 'center 24%',
               }}
             />
-            <div className="flex items-center gap-1.5">
-              <span className={`font-black text-base sm:text-xl tracking-tight flex items-center ${
-                settings.theme === 'dark' ? 'text-neutral-100' : 'text-neutral-900'
-              }`}>
-                CYBER<span className={`${settings.theme === 'dark' ? 'text-amber-400' : 'text-amber-600'} ml-1`}>KIWI</span>
-              </span>
-              <span className="text-sm font-black px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 hidden xs:inline-block">
-                v0.2.0
-              </span>
-            </div>
-          </div>
+            <span className="font-display text-base font-bold tracking-tight sm:text-xl">CyberKiwi</span>
+          </a>
 
           {/* Desktop Search Bar */}
           <div className="hidden md:flex flex-1 max-w-xs md:max-w-sm lg:max-w-xs xl:max-w-md relative">
@@ -248,81 +270,16 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? `animate-spin ${acc.text}` : ''}`} />
-              <span className="text-sm">{isRefreshing ? '...' : `${countdown}s`}</span>
+              <span className="hidden text-sm sm:inline">{isRefreshing ? '...' : `${countdown}s`}</span>
             </button>
 
-            {/* AI Curator Button */}
             <button
-              onClick={onOpenAICurator}
-              aria-label={t.nav.aiCurator}
-              className={`hidden sm:flex items-center gap-1.5 px-2.5 xl:px-3 py-1.5 rounded-card text-sm font-black bg-gradient-to-r ${acc.gradientFrom} ${acc.gradientTo} text-black shadow-md transition-all`}
-              title={t.nav.aiCurator}
+              type="button"
+              onClick={onOpenAccount}
+              className={`flex items-center gap-1.5 rounded-control px-2.5 py-2 text-sm font-bold whitespace-nowrap text-black ${acc.bg} ${acc.bgHover}`}
             >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span className="hidden xl:inline">{t.nav.aiCurator}</span>
-            </button>
-
-            {/* Add Dynamic Block Button */}
-            <button
-              onClick={onOpenCreateBlock}
-              aria-label={t.nav.newBlock}
-              className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-card text-sm font-black ${acc.bg} ${acc.bgHover} text-black transition-all shadow-md`}
-              title={`${t.nav.newBlock} (Ctrl+N)`}
-            >
-              <Plus className="w-3.5 h-3.5 stroke-[3]" />
-              <span className="hidden xl:inline">{t.nav.newBlock}</span>
-            </button>
-
-            {/* Feeds Manager */}
-            <button
-              onClick={onOpenManageFeeds}
-              aria-label={t.nav.manageFeeds}
-              title={t.nav.manageFeeds}
-              className={`hidden sm:block p-2 rounded-card border transition-all ${
-                settings.theme === 'dark'
-                  ? 'bg-neutral-900 border-neutral-800 text-neutral-300 hover:bg-neutral-800'
-                  : 'bg-neutral-100 border-neutral-300 text-neutral-700 hover:bg-neutral-200'
-              }`}
-            >
-              <ListPlus className="w-4 h-4" />
-            </button>
-
-            {/* Bookmarks Quick Toggle */}
-            <button
-              onClick={onToggleBookmarks}
-              aria-label={`${t.nav.bookmarks}${showBookmarksOnly ? ' (active)' : ''}`}
-              aria-pressed={showBookmarksOnly}
-              title={`${t.nav.bookmarks} (Ctrl+B)`}
-              className={`relative hidden sm:block p-2 rounded-card border transition-all ${
-                showBookmarksOnly
-                  ? `${acc.bgLight} ${acc.borderLight} ${acc.textDark}`
-                  : settings.theme === 'dark'
-                  ? 'bg-neutral-900 border-neutral-800 text-neutral-300 hover:bg-neutral-800'
-                  : 'bg-neutral-100 border-neutral-300 text-neutral-700 hover:bg-neutral-200'
-              }`}
-            >
-              <Bookmark className={`w-4 h-4 ${showBookmarksOnly ? acc.fill : ''}`} />
-              {bookmarkCount > 0 && (
-                <span className={`absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full ${acc.bg} text-sm font-black text-black`}>
-                  {bookmarkCount}
-                </span>
-              )}
-            </button>
-
-            {/* Quick Language Switcher */}
-            <button
-              onClick={() => {
-                const nextLang = settings.language === 'pt' ? 'en' : 'pt';
-                onUpdateSettings({ ...settings, language: nextLang });
-              }}
-              title={settings.language === 'pt' ? 'Mudar idioma para Inglês' : 'Mudar idioma para Português (Brasil)'}
-              className={`hidden sm:flex px-2.5 py-1.5 rounded-card border text-sm font-bold transition-all cursor-pointer items-center gap-1 ${
-                settings.theme === 'dark'
-                  ? 'bg-neutral-900 border-neutral-800 text-amber-400 hover:bg-neutral-800 hover:border-amber-500/50'
-                  : 'bg-neutral-100 border-neutral-300 text-amber-700 hover:bg-neutral-200 hover:border-amber-500/50'
-              }`}
-            >
-              <span>{settings.language === 'pt' ? '🇧🇷 PT' : '🇺🇸 EN'}</span>
+              {signedIn ? <UserRound className="size-4" aria-hidden="true" /> : <LogIn className="size-4" aria-hidden="true" />}
+              {accountLabel}
             </button>
 
             {/* Settings */}
@@ -339,127 +296,85 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Settings className="w-4 h-4" />
             </button>
 
-            {/* Mobile Menu Toggle */}
+            {/* Dashboard tools */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              aria-label={mobileMenuOpen ? t.nav.closeMenu : t.nav.openMenu}
+              aria-label={settings.language === 'pt' ? 'Ferramentas do painel' : 'Dashboard tools'}
               aria-expanded={mobileMenuOpen}
-              className={`p-2 rounded-card border lg:hidden transition-colors ${
+              aria-controls="dashboard-tools"
+              className={`p-2 rounded-card border transition-colors ${
                 settings.theme === 'dark'
                   ? 'border-neutral-800 bg-neutral-900 text-neutral-300'
                   : 'border-neutral-300 bg-neutral-100 text-neutral-700'
               }`}
-              title="Menu"
+              title={settings.language === 'pt' ? 'Ferramentas' : 'Tools'}
             >
               {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
             </button>
           </div>
         </div>
 
-        {/* Desktop Category Tabs */}
-        <nav
-          aria-label="Security topics"
-          className={`relative hidden lg:flex min-w-0 items-center gap-4 overflow-x-auto no-scrollbar border-t py-2 ${
-            settings.theme === 'dark' ? 'border-neutral-800/40' : 'border-neutral-200'
-          }`}
-        >
-          <div className="flex min-w-max items-center gap-4 px-1">
-            {categoryTabs.map((tab) => {
-              const isActive = selectedCategory === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => onSelectCategory && onSelectCategory(tab.id)}
-                  className={`relative py-1 text-sm font-bold tracking-wide transition-colors cursor-pointer whitespace-nowrap ${
-                    isActive
-                      ? 'text-amber-400'
-                      : settings.theme === 'dark'
-                        ? 'text-neutral-400 hover:text-neutral-200'
-                        : 'text-neutral-500 hover:text-neutral-900'
-                  }`}
-                >
-                  {tab.label}
-                  {isActive && (
-                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-400 rounded-full shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
-                  )}
-                </button>
-              );
-            })}
+        {mobileMenuOpen && (
+          <div id="dashboard-tools" className={`mb-2 flex flex-wrap gap-1 rounded-card border p-2 ${settings.theme === 'dark' ? 'border-neutral-800 bg-neutral-900' : 'border-neutral-200 bg-white'}`}>
+            {tools.map(({ label, icon: Icon, action, pressed }) => (
+              <button
+                type="button"
+                key={label}
+                aria-pressed={pressed}
+                onClick={() => { setMobileMenuOpen(false); action(); }}
+                className={utilityClass}
+              >
+                <Icon className="size-4" aria-hidden="true" />
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <nav aria-label="Security topics" className={`relative flex items-center gap-2 border-t py-2 ${settings.theme === 'dark' ? 'border-neutral-800' : 'border-neutral-200'}`}>
+          <div className="flex min-w-0 items-center gap-1 overflow-x-auto no-scrollbar">
+            {categoryTabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                aria-pressed={selectedCategory === tab.id}
+                onClick={() => onSelectCategory?.(tab.id)}
+                className={`${utilityClass} shrink-0 whitespace-nowrap ${selectedCategory === tab.id ? 'bg-amber-500/15 ring-1 ring-inset ring-amber-500/40' : ''}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <div className="relative shrink-0">
             <button
               type="button"
               aria-expanded={moreOpen}
               aria-haspopup="menu"
               ref={moreTriggerRef}
               onClick={() => setMoreOpen((open) => !open)}
-              className={`relative py-1 text-sm font-bold tracking-wide transition-colors cursor-pointer whitespace-nowrap ${moreOpen ? 'text-amber-400' : settings.theme === 'dark' ? 'text-neutral-400 hover:text-neutral-200' : 'text-neutral-500 hover:text-neutral-900'}`}
+              className={`${utilityClass} whitespace-nowrap ${selectedMoreTopic ? 'bg-amber-500/15 ring-1 ring-inset ring-amber-500/40' : ''}`}
             >
-              More
+              {selectedMoreTopic?.label ?? 'More topics'}
+              <ChevronDown className="size-3.5" aria-hidden="true" />
             </button>
+            {moreOpen && (
+              <div ref={moreMenuRef} role="menu" className={`absolute top-full right-0 z-50 mt-2 w-44 rounded-control border p-1 shadow-xl sm:right-auto sm:left-0 ${settings.theme === 'dark' ? 'border-neutral-700 bg-neutral-900' : 'border-neutral-200 bg-white'}`}>
+                {moreTopics.map((topic) => (
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={selectedCategory === topic.id}
+                    key={topic.id}
+                    onClick={() => { onSelectCategory?.(topic.id); setMoreOpen(false); moreTriggerRef.current?.focus(); }}
+                    className={`${utilityClass} w-full text-left`}
+                  >
+                    {topic.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          {moreOpen && (
-            <div ref={moreMenuRef} role="menu" className={`absolute right-1 top-11 z-50 min-w-36 rounded-control border p-1 shadow-xl ${settings.theme === 'dark' ? 'border-neutral-700 bg-neutral-900 text-neutral-100' : 'border-neutral-200 bg-white text-neutral-900'}`}>
-              {moreTopics.map((topic) => (
-                <button
-                  type="button"
-                  role="menuitem"
-                  key={topic.id}
-                  onClick={() => { onSelectCategory?.(topic.id); setMoreOpen(false); moreTriggerRef.current?.focus(); }}
-                  className="w-full rounded-chip px-3 py-2 text-left text-sm font-semibold hover:bg-amber-500/10"
-                >
-                  {topic.label}
-                </button>
-              ))}
-            </div>
-          )}
         </nav>
-
-        {/* Mobile Horizontal Category Pills Bar */}
-        <div aria-label="Security topics" className={`flex lg:hidden items-center gap-2 overflow-x-auto no-scrollbar stories-scroll-container py-2 border-t ${
-          settings.theme === 'dark' ? 'border-neutral-800/40' : 'border-neutral-200'
-        }`}>
-          {categoryTabs.map((tab) => {
-            const isActive = selectedCategory === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => onSelectCategory && onSelectCategory(tab.id)}
-                className={`px-3 py-1 rounded-control text-sm font-bold whitespace-nowrap transition-all ${
-                  isActive
-                    ? 'bg-amber-500 text-black shadow-sm'
-                    : settings.theme === 'dark'
-                      ? 'bg-neutral-900/90 text-neutral-400 border border-neutral-800/80 hover:text-white'
-                      : 'bg-neutral-200/90 text-neutral-600 border border-neutral-300/80 hover:text-neutral-900'
-                }`}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
-          <button
-            type="button"
-            aria-expanded={moreOpen}
-            onClick={() => setMoreOpen((open) => !open)}
-            className={`px-3 py-1 rounded-control text-sm font-bold whitespace-nowrap border ${moreOpen ? 'bg-amber-500 text-black border-amber-500' : settings.theme === 'dark' ? 'bg-neutral-900/90 text-neutral-300 border-neutral-800/80' : 'bg-neutral-200/90 text-neutral-700 border-neutral-300/80'}`}
-          >
-            More
-          </button>
-        </div>
-
-        {moreOpen && (
-          <div className={`lg:hidden flex gap-2 overflow-x-auto no-scrollbar px-1 pb-2 ${settings.theme === 'dark' ? 'text-neutral-100' : 'text-neutral-900'}`}>
-            {moreTopics.map((topic) => (
-              <button
-                type="button"
-
-                key={topic.id}
-                onClick={() => { onSelectCategory?.(topic.id); setMoreOpen(false); }}
-                className="rounded-control border border-amber-500/40 px-3 py-1 text-sm font-semibold whitespace-nowrap hover:bg-amber-500/10"
-              >
-                {topic.label}
-              </button>
-            ))}
-          </div>
-        )}
 
         {/* Mobile Search Bar */}
         <div className="md:hidden pb-2.5 pt-0.5">
@@ -489,116 +404,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* Mobile Extra Drawer Menu */}
-        {mobileMenuOpen && (
-          <div className={`lg:hidden p-3 border-t rounded-b-2xl mb-2 flex flex-wrap gap-2 text-sm transition-all ${
-            settings.theme === 'dark'
-              ? 'border-neutral-800 bg-[#0d0e12] text-neutral-100'
-              : 'border-neutral-200 bg-neutral-100 text-neutral-900 shadow-md'
-          }`}>
-            <button
-              onClick={() => {
-                onOpenAICurator();
-                setMobileMenuOpen(false);
-              }}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-control bg-amber-500/20 text-amber-500 border border-amber-500/40 font-bold cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>{t.nav.aiCurator}</span>
-            </button>
-
-            <button
-              onClick={() => {
-                onOpenManageFeeds();
-                setMobileMenuOpen(false);
-              }}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-control border font-bold cursor-pointer ${
-                settings.theme === 'dark'
-                  ? 'bg-neutral-900 text-neutral-300 border-neutral-800 hover:bg-neutral-800'
-                  : 'bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-200'
-              }`}
-            >
-              <ListPlus className="w-3.5 h-3.5" />
-              <span>{t.nav.manageFeeds}</span>
-            </button>
-
-            <button
-              onClick={() => {
-                onToggleBookmarks();
-                setMobileMenuOpen(false);
-              }}
-              aria-pressed={showBookmarksOnly}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-control border font-bold cursor-pointer ${
-                showBookmarksOnly
-                  ? `${acc.bgLight} ${acc.borderLight} ${acc.textDark}`
-                  : settings.theme === 'dark'
-                    ? 'bg-neutral-900 text-neutral-300 border-neutral-800 hover:bg-neutral-800'
-                    : 'bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-200'
-              }`}
-            >
-              <Bookmark className={`w-3.5 h-3.5 ${showBookmarksOnly ? acc.fill : ''}`} />
-              <span>{t.nav.bookmarks}{bookmarkCount > 0 ? ` (${bookmarkCount})` : ''}</span>
-            </button>
-
-            <button
-              onClick={() => {
-                const nextLang = settings.language === 'pt' ? 'en' : 'pt';
-                onUpdateSettings({ ...settings, language: nextLang });
-                setMobileMenuOpen(false);
-              }}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-control border font-bold cursor-pointer ${
-                settings.theme === 'dark'
-                  ? 'bg-neutral-900 text-amber-400 border-neutral-800 hover:bg-neutral-800'
-                  : 'bg-white text-amber-700 border-neutral-300 hover:bg-neutral-200'
-              }`}
-            >
-              <Globe className="w-3.5 h-3.5" />
-              <span>{settings.language === 'pt' ? 'Português (BR)' : 'English (US)'}</span>
-            </button>
-
-            <button
-              onClick={() => {
-                onOpenGlobalFeeds();
-                setMobileMenuOpen(false);
-              }}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-control border font-bold cursor-pointer ${
-                settings.theme === 'dark'
-                  ? 'bg-neutral-900 text-neutral-300 border-neutral-800 hover:bg-neutral-800'
-                  : 'bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-200'
-              }`}
-            >
-              <Globe className="w-3.5 h-3.5" />
-              <span>{t.nav.globalDirectory}</span>
-            </button>
-
-            <button
-              onClick={() => {
-                onToggleArchive();
-                setMobileMenuOpen(false);
-              }}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-control border font-bold cursor-pointer ${
-                settings.theme === 'dark'
-                  ? 'bg-neutral-900 text-neutral-300 border-neutral-800 hover:bg-neutral-800'
-                  : 'bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-200'
-              }`}
-            >
-              <Archive className="w-3.5 h-3.5" />
-              <span>{t.nav.archive} ({archivedCount})</span>
-            </button>
-
-            <button
-              onClick={toggleTheme}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-control border font-bold cursor-pointer ${
-                settings.theme === 'dark'
-                  ? 'bg-neutral-900 text-neutral-300 border-neutral-800 hover:bg-neutral-800'
-                  : 'bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-200'
-              }`}
-            >
-              {settings.theme === 'dark' ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5" />}
-              <span>{settings.theme === 'dark' ? t.settings.themeLight : t.settings.themeDark}</span>
-            </button>
-          </div>
-        )}
 
       </div>
     </header>

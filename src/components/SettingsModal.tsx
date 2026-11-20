@@ -13,6 +13,7 @@ import { AuthPanel } from './AuthPanel';
 
 interface SettingsModalProps {
   isOpen: boolean;
+  accountOnly?: boolean;
   onClose: () => void;
   settings: AppSettings;
   onUpdateSettings: (newSettings: AppSettings) => void;
@@ -39,6 +40,7 @@ const ACCENT_COLORS: {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
+  accountOnly = false,
   onClose,
   settings,
   onUpdateSettings,
@@ -237,7 +239,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }`}>
           <div className="flex items-center gap-2">
             <Settings className="w-5 h-5 text-orange-500" />
-            <h3 id="settings-modal-title" className="font-display font-bold text-heading">{t.settings.title}</h3>
+            <h3 id="settings-modal-title" className="font-display font-bold text-heading">
+              {accountOnly ? (settings.language === 'pt' ? 'Conta' : 'Account') : t.settings.title}
+            </h3>
           </div>
           <button
             onClick={onClose}
@@ -252,6 +256,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Form Body */}
         <div className="p-6 space-y-5 overflow-y-auto">
+          {accountOnly ? <AuthPanel theme={settings.theme} /> : <>
           
           {/* Language Selector */}
           <div className={`p-4 rounded-card border space-y-3 ${
@@ -848,6 +853,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           </div>
 
+          </>}
         </div>
 
       </div>

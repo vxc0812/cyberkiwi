@@ -36,11 +36,12 @@ npm run db:up                # PostgreSQL 16 on 127.0.0.1:5433
 npm run db:deploy            # apply migrations
 npm run db:seed              # load the feed catalog
 npm run worker:once          # fetch feeds once and build stories
-npm run auth:invite          # prints a one-time invite code; register with it in the app
-npm run dev                  # http://localhost:3000
+VITE_CYBERKIWI_LOCAL_GUEST=true npm run dev  # http://localhost:3000
 ```
 
 Without an AI key, reading, feeds and reader mode work normally. AI features show as unavailable.
+
+Local guest mode lets a loopback-bound server and its localhost dashboard serve ingested stories without an account. For a local production bundle, set `VITE_CYBERKIWI_LOCAL_GUEST=true` for both `npm run build` and `npm start`.
 
 Install dependencies on the machine that runs them. A `node_modules` folder copied from another OS (for example Windows to Linux) is missing platform binaries and executable permissions, and builds fail.
 

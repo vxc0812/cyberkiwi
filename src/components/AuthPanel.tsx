@@ -106,6 +106,7 @@ export function AuthPanel({ theme }: Props) {
 
   return (
     <section className={panel} aria-labelledby="account-heading">
+      <h3 id="account-heading" className="sr-only">Account</h3>
       <div className="flex gap-2" role="tablist" aria-label="Account">
         <button type="button" role="tab" aria-selected={mode === 'login'} onClick={() => setMode('login')} className={`${button} ${mode === 'login' ? 'border-orange-500 text-orange-400' : 'border-neutral-500/40'}`}>
           <LogIn className="w-3.5 h-3.5" aria-hidden="true" /> Sign in

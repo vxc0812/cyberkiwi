@@ -40,6 +40,7 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 // Loopback unless HOST says otherwise. Binding every interface is never the default (report F15, F19).
 const HOST = process.env.HOST?.trim() || '127.0.0.1';
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+const localGuestReads = LOOPBACK_HOSTS.has(HOST) && process.env.VITE_CYBERKIWI_LOCAL_GUEST === 'true';
 // Exact origins allowed to make credentialed requests in production (comma-separated). Native apps add
 // their own origins, for example capacitor://localhost on iOS and https://localhost on Android.
 const ALLOWED_ORIGINS = parseAllowedOrigins(process.env.ALLOWED_ORIGIN || (IS_PRODUCTION ? 'https://cyberkiwi.app' : ''));
@@ -618,7 +619,12 @@ app.use(appLinkRoutes(appLinkConfigFromEnv()));
 app.use('/api/v1/enrichment', createEnrichmentStatsRouter(db));
 
 // Read-only persisted-content API (Phase 1). Clients never trigger fetches through it.
-app.use('/api/v1', createReadApi(db, { adminToken: process.env.ADMIN_TOKEN || undefined }));
+app.use('/api/v1', createReadApi(db, {
+  adminToken: process.env.ADMIN_TOKEN || undefined,
+  allowLocalGuest: (req) => localGuestReads
+    && LOOPBACK_HOSTS.has(req.hostname)
+    && LOOPBACK_HOSTS.has(req.socket.remoteAddress ?? ''),
+}));
 
 // JSON error handler: no stack traces or HTML to clients (e.g. oversize bodies).
 app.use((err: any, _req: Request, res: ExpressResponse, _next: NextFunction) => {

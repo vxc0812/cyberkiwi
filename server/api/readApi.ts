@@ -401,6 +401,7 @@ export function bearerFrom(req: Request): string | undefined {
 export interface ReadApiOptions {
   /** Enables /ingestion/runs when set. Unset means the operator endpoint does not exist. */
   adminToken?: string;
+  allowLocalGuest?: (req: Request) => boolean;
 }
 
 export function createReadApi(db: PrismaClient, options: ReadApiOptions = {}): Router {
@@ -414,11 +415,11 @@ export function createReadApi(db: PrismaClient, options: ReadApiOptions = {}): R
 
   // Content is invite-only: story and article reads need a signed-in user. The caller is resolved
   // upstream by attachSession (server.ts); without it every content read is refused, never served.
-  router.use(['/stories', '/articles'], (_req, res, next) => {
+  router.use(['/stories', '/articles'], (req, res, next) => {
     // A cached response must never be reused across different credentials, and a refusal is never cached.
     res.vary('Authorization');
     res.vary('Cookie');
-    if (!principalOf(res)) {
+    if (!principalOf(res) && !options.allowLocalGuest?.(req)) {
       res.setHeader('Cache-Control', 'no-store');
       return sendError(res, 'unauthorized');
     }

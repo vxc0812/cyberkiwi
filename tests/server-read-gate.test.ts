@@ -86,6 +86,13 @@ check('a different account signs in: reads run again for the new user', () => {
   assert.equal(steps[2].key, 'u2');
 });
 
+check('localhost guest reads can start before session restore', () => {
+  const guest = serverReadGate(true, true, null, true);
+  assert.equal(guest, 'guest');
+  assert.equal(readerKey(guest, null), 'localhost-guest');
+  assert.equal(serverReadGate(false, false, null, true), 'local');
+});
+
 if (failures > 0) {
   console.log(`\n${failures} read gate check(s) failed.`);
   process.exitCode = 1;
