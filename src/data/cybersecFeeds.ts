@@ -71,8 +71,15 @@ export const CYBERSEC_DEFAULT_FEEDS: RssFeed[] = [
   { id: 'yeswehack', title: 'YesWeHack Blog', url: 'https://blog.yeswehack.com/feed/', category: 'bugbounty', icon: '✅', active: true, status: 'ok' },
   
   // === PODCASTS / VIDEO (via RSS) ===
-  { id: 'darknet_diaries', title: 'Darknet Diaries', url: 'https://darknetdiaries.com/feed/', category: 'podcasts', icon: '🎧', active: true, status: 'ok' },
-  { id: 'risky_biz', title: 'Risky Business', url: 'https://risky.biz/rss/', category: 'podcasts', icon: '🎙️', active: true, status: 'ok' },
-  { id: 'security_now', title: 'Security Now!', url: 'https://feeds.twit.tv/sn_audio.xml', category: 'podcasts', icon: '📻', active: true, status: 'ok' },
-  { id: 'malicious_life', title: 'Malicious Life', url: 'https://malicious.life/feed/', category: 'podcasts', icon: '💀', active: true, status: 'ok' },
+  { id: 'darknet_diaries', title: 'Darknet Diaries', url: 'https://podcast.darknetdiaries.com/', category: 'podcasts', icon: '🎧', active: true, status: 'ok' },
+  { id: 'risky_biz', title: 'Risky Business', url: 'https://risky.biz/feeds/risky-business/', category: 'podcasts', icon: '🎙️', active: true, status: 'ok' },
+  { id: 'security_now', title: 'Security Now!', url: 'https://feeds.twit.tv/sn.xml', category: 'podcasts', icon: '📻', active: true, status: 'ok' },
+  { id: 'cyberwire_daily', title: 'CyberWire Daily', url: 'https://thecyberwire.com/podcasts/daily-podcast/rss.xml', category: 'podcasts', icon: '🎧', active: true, status: 'ok' },
 ];
+
+export const LEGACY_PODCAST_FEED_IDS = new Map([
+  ['https://darknetdiaries.com/feed/', 'darknet_diaries'],
+  ['https://risky.biz/rss/', 'risky_biz'],
+  ['https://feeds.twit.tv/sn_audio.xml', 'security_now'],
+  ['https://malicious.life/feed/', 'cyberwire_daily'],
+]);

@@ -9,7 +9,7 @@ import { AICuratorModal } from './components/AICuratorModal';
 import { SettingsModal } from './components/SettingsModal';
 import { GlobalFeedsModal } from './components/GlobalFeedsModal';
 import { ToastNotificationContainer } from './components/ToastNotificationContainer';
-import { CYBERSEC_DEFAULT_FEEDS } from './data/cybersecFeeds';
+import { CYBERSEC_DEFAULT_FEEDS, LEGACY_PODCAST_FEED_IDS } from './data/cybersecFeeds';
 import { CYBERSEC_DEFAULT_BLOCKS, migrateCybersecBlocks } from './data/cybersecBlocks';
 import { DynamicBlock, NewsItem, NewsStory, RssFeed, AppSettings, BlockLayout, ToastItem } from './types';
 import { authedFetchUrl } from './services/apiClient';
@@ -70,6 +70,9 @@ export default function App() {
     try {
       const parsed: RssFeed[] = JSON.parse(saved);
       const mapped = parsed.map((feed): RssFeed => {
+        const podcastId = LEGACY_PODCAST_FEED_IDS.get(feed.url);
+        const replacement = podcastId && CYBERSEC_DEFAULT_FEEDS.find((entry) => entry.id === podcastId);
+        if (replacement) return { ...replacement, active: feed.active };
         if (feed.url.includes('feeds.folha.uol.com.br')) {
           return { ...feed, id: 'cnn_brasil', title: 'CNN Brasil', url: 'https://www.cnnbrasil.com.br/feed/' };
         }
