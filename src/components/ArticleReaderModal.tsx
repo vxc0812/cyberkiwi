@@ -31,7 +31,6 @@ import { summarizeBlockWithAi, translateWithAi, isNativePlatform } from '../serv
 import { fetchFullArticle } from '../services/readabilityService';
 import { shareArticle } from '../services/shareService';
 import { Language, getTranslation } from '../i18n/translations';
-import { showError } from '../utils/errorHandler';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
 interface ArticleReaderModalProps {
@@ -66,6 +65,9 @@ export const ArticleReaderModal: React.FC<ArticleReaderModalProps> = ({
   const acc = getAccent(accentColor);
   const t = getTranslation(language);
   const [isPlayingTts, setIsPlayingTts] = useState<boolean>(false);
+  const [toolError, setToolError] = useState<string | null>(null);
+  const speakingRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const toolGenerationRef = useRef(0);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [isGeneratingAi, setIsGeneratingAi] = useState<boolean>(false);
   const [translatedText, setTranslatedText] = useState<string | null>(null);
@@ -145,10 +147,6 @@ export const ArticleReaderModal: React.FC<ArticleReaderModalProps> = ({
     setScrollProgress(0);
     setExtractedArticle(null);
     setExtractionError(null);
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      setIsPlayingTts(false);
-    }
   }, [article]);
 
   // --- Touch & Swipe Gesture Handlers (Left-to-Right & Right-to-Left) ---
@@ -224,6 +222,21 @@ export const ArticleReaderModal: React.FC<ArticleReaderModalProps> = ({
   const displayImage = currentSource?.imageUrl || article?.imageUrl;
   const audioUrl = normalizeAudioUrl(currentSource ? currentSource.audioUrl : article?.audioUrl);
 
+  useEffect(() => {
+    setToolError(null);
+    setIsPlayingTts(false);
+    setIsGeneratingAi(false);
+    setIsTranslating(false);
+    return () => {
+      toolGenerationRef.current += 1;
+      if (speakingRef.current) {
+        speakingRef.current = null;
+        window.speechSynthesis?.cancel();
+      }
+    };
+  }, [article?.id, displayLink]);
+
+
   // Auto-fetch full article when viewMode is 'full'
   useEffect(() => {
     if (!displayLink || viewMode !== 'full') return;
@@ -276,76 +289,101 @@ export const ArticleReaderModal: React.FC<ArticleReaderModalProps> = ({
     setExtractedArticle(null);
   };
 
-  // Web Speech API Text-to-Speech
   const handleToggleTts = () => {
-    if (!('speechSynthesis' in window)) {
-      showError(t.reader.ttsNotSupported);
+    const speech = window.speechSynthesis;
+    setToolError(null);
+    if (!speech || typeof SpeechSynthesisUtterance === 'undefined') {
+      setToolError(t.reader.ttsNotSupported);
+      return;
+    }
+    if (speakingRef.current) {
+      speakingRef.current = null;
+      speech.cancel();
+      setIsPlayingTts(false);
       return;
     }
 
-    if (isPlayingTts) {
-      window.speechSynthesis.cancel();
+    const body = viewMode === 'full' ? extractedArticle?.textContent || displaySnippet : displaySnippet;
+    const text = [displayTitle, body].filter(Boolean).join('. ').replace(/\s+/g, ' ').trim();
+    const chunks = text.match(/.{1,220}(?: |$)|.{1,220}/gu) ?? [];
+    if (chunks.length === 0) return;
+
+    const locale = language === 'pt' ? 'pt-BR' : 'en-US';
+    const voices = speech.getVoices();
+    const voice = voices.find((entry) => entry.lang.toLowerCase() === locale.toLowerCase())
+      ?? voices.find((entry) => entry.lang.toLowerCase().startsWith(locale.split('-')[0] + '-'));
+    const speechFailed = () => {
+      speakingRef.current = null;
       setIsPlayingTts(false);
-    } else {
-      const bodyToRead = (viewMode === 'full' && extractedArticle?.textContent)
-        ? extractedArticle.textContent.slice(0, 4000)
-        : displaySnippet;
-      const textToRead = `${displayTitle}. ${bodyToRead}`;
-      const utterance = new SpeechSynthesisUtterance(textToRead);
-      utterance.lang = language === 'pt' ? 'pt-BR' : 'en-US';
-      utterance.rate = 1.0;
+      setToolError(language === 'pt'
+        ? 'Não foi possível reproduzir a leitura. Verifique se há uma voz instalada no navegador ou dispositivo.'
+        : 'Read aloud could not start. Check that your browser or device has a speech voice installed.');
+    };
 
-      utterance.onend = () => setIsPlayingTts(false);
-      utterance.onerror = () => setIsPlayingTts(false);
+    const speakChunk = (index: number) => {
+      const utterance = new SpeechSynthesisUtterance(chunks[index].trim());
+      utterance.lang = locale;
+      if (voice) utterance.voice = voice;
+      speakingRef.current = utterance;
+      utterance.onend = () => {
+        if (speakingRef.current !== utterance) return;
+        if (index + 1 < chunks.length) speakChunk(index + 1);
+        else {
+          speakingRef.current = null;
+          setIsPlayingTts(false);
+        }
+      };
+      utterance.onerror = () => {
+        if (speakingRef.current === utterance) speechFailed();
+      };
+      try {
+        speech.speak(utterance);
+      } catch {
+        speechFailed();
+      }
+    };
 
-      window.speechSynthesis.speak(utterance);
-      setIsPlayingTts(true);
-    }
+    setIsPlayingTts(true);
+    speakChunk(0);
   };
 
-  // Generate AI Executive Summary with Gemini (Consolidated for multi-source stories)
   const handleGenerateAiSummary = async () => {
     if (!article) return;
+    const generation = toolGenerationRef.current;
+    setToolError(null);
+    setIsGeneratingAi(true);
     try {
-      setIsGeneratingAi(true);
-      const itemsToSummarize = isMultiSource && story?.articles && story.articles.length > 0
+      const itemsToSummarize = isMultiSource && story?.articles?.length
         ? story.articles
         : [{
             ...article,
-            contentSnippet: (viewMode === 'full' && extractedArticle?.textContent)
-              ? extractedArticle.textContent.slice(0, 3000)
-              : displaySnippet,
+            contentSnippet: viewMode === 'full' ? extractedArticle?.textContent || displaySnippet : displaySnippet,
           }];
       const data = await summarizeBlockWithAi(itemsToSummarize, displayTitle, isMultiSource);
-      if (data.success && data.summary) {
-        setAiSummary(data.summary);
-      } else {
-        showError(data.error || t.reader.summaryFailed);
-      }
-    } catch (err: any) {
-      showError(t.reader.summaryFailed);
+      if (toolGenerationRef.current !== generation) return;
+      if (data.success && data.summary) setAiSummary(data.summary);
+      else setToolError(data.error || t.reader.summaryFailed);
+    } catch {
+      if (toolGenerationRef.current === generation) setToolError(t.reader.summaryFailed);
     } finally {
-      setIsGeneratingAi(false);
+      if (toolGenerationRef.current === generation) setIsGeneratingAi(false);
     }
   };
 
-  // Gemini AI Translate
   const handleTranslate = async () => {
+    const generation = toolGenerationRef.current;
+    setToolError(null);
+    setIsTranslating(true);
     try {
-      setIsTranslating(true);
-      const textToTranslate = (viewMode === 'full' && extractedArticle?.textContent)
-        ? extractedArticle.textContent.slice(0, 1500)
-        : displaySnippet;
-      const data = await translateWithAi(displayTitle, textToTranslate);
-      if (data.success && data.translation) {
-        setTranslatedText(data.translation);
-      } else {
-        showError(data.error || t.reader.translationFailed);
-      }
-    } catch (err) {
-      showError(t.reader.translationFailed);
+      const textToTranslate = viewMode === 'full' ? extractedArticle?.textContent || displaySnippet : displaySnippet;
+      const data = await translateWithAi(displayTitle, textToTranslate.slice(0, 4000));
+      if (toolGenerationRef.current !== generation) return;
+      if (data.success && data.translation) setTranslatedText(data.translation);
+      else setToolError(data.error || t.reader.translationFailed);
+    } catch {
+      if (toolGenerationRef.current === generation) setToolError(t.reader.translationFailed);
     } finally {
-      setIsTranslating(false);
+      if (toolGenerationRef.current === generation) setIsTranslating(false);
     }
   };
 
@@ -739,6 +777,12 @@ export const ArticleReaderModal: React.FC<ArticleReaderModalProps> = ({
               <span>{isTranslating ? t.reader.translating : t.reader.translate}</span>
             </button>
           </div>
+
+          {toolError && (
+            <p role="status" className="rounded-control border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+              {toolError}
+            </p>
+          )}
 
           {/* AI Generated Summary Box */}
           {aiSummary && (

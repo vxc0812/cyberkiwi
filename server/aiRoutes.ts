@@ -6,7 +6,7 @@
 import type { Request, Response } from 'express';
 import { AI_LIMITS, UNTRUSTED_NOTICE, boundedText, untrusted } from './aiGuard';
 
-const MODEL = 'gemini-2.0-flash';
+const MODEL = process.env.GEMINI_MODEL?.trim() || 'gemini-3.1-flash-lite';
 
 type GenerateFn = (args: { model: string; contents: string; config?: Record<string, unknown> }) => Promise<{ text?: string }>;
 

@@ -55,6 +55,7 @@ Use `.env` for shared defaults and `.env.local` for git-ignored local overrides.
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string. Required for stories, accounts and workers. |
 | `GEMINI_API_KEY` | Server-side Google Gemini key. Never sent to the browser. |
+| `GEMINI_MODEL` | Optional server-side model override. Defaults to `gemini-3.1-flash-lite`. |
 | `NVD_API_KEY` | Optional NVD API key used only by the server-side CVE ingestion adapter. |
 | `VITE_CYBERKIWI_API_BASE_URL` | API origin embedded into web and native builds. Required for release targets. |
 | `WORKER_INTERVAL_MS` | Continuous worker interval in milliseconds (default `300000`). |

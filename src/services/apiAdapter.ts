@@ -269,6 +269,17 @@ export async function checkServerAiStatus(): Promise<{ valid: boolean; message: 
   }
 }
 
+async function readerAiResponse<T>(response: Response): Promise<T | { success: false; error: string }> {
+  if (response.status === 401) {
+    return { success: false, error: 'Sign in or add your Gemini key in Settings to use AI.' };
+  }
+  const result = await response.json() as T & { error?: string };
+  if (response.status === 503 && result.error === 'AI features are not enabled on this server') {
+    return { success: false, error: 'This server has no Gemini key configured. Add your own under Settings → Gemini API Key.' };
+  }
+  return result;
+}
+
 // 3. AI Summarize Block
 export async function summarizeBlockWithAi(
   items: NewsItem[],
@@ -291,9 +302,17 @@ export async function summarizeBlockWithAi(
     const res = await apiFetch('/api/gemini/summarize', {
       method: 'POST',
       headers: await aiAuthHeaders(keyStore),
-      body: JSON.stringify({ items, topic, isMultiSourceStory }),
+      body: JSON.stringify({
+        items: items.slice(0, 10).map(({ title, sourceName, contentSnippet }) => ({
+          title: title.slice(0, 300),
+          sourceName: sourceName.slice(0, 100),
+          contentSnippet: contentSnippet.slice(0, 600),
+        })),
+        topic,
+        isMultiSourceStory,
+      }),
     });
-    return await res.json();
+    return await readerAiResponse<{ success: boolean; summary?: string; error?: string }>(res);
   } catch (err: any) {
     return { success: false, error: err.message || 'Falha ao conectar com o servidor.' };
   }
@@ -344,7 +363,7 @@ export async function translateWithAi(title: string, content: string): Promise<{
   if (isNativePlatform() && nativeAiMode({ hasUserKey, apiBase: nativeApiBase() }) === 'fallback') {
     return {
       success: false,
-      error: 'Insira sua chave gratuita da Google Gemini em Configurações para traduzir no Android.',
+      error: 'Add your Gemini key in Settings to translate on this device.',
     };
   }
 
@@ -354,7 +373,7 @@ export async function translateWithAi(title: string, content: string): Promise<{
       headers: await aiAuthHeaders(keyStore),
       body: JSON.stringify({ title, content }),
     });
-    return await res.json();
+    return await readerAiResponse<{ success: boolean; translation?: string; error?: string }>(res);
   } catch (err: any) {
     return { success: false, error: err.message || 'Falha ao conectar com o servidor.' };
   }
