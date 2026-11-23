@@ -13,8 +13,6 @@ interface TickerBarProps {
 }
 
 export const TickerBar: React.FC<TickerBarProps> = ({ items, onSelectArticle, theme, accentColor, language = 'en' }) => {
-  if (!items || items.length === 0) return null;
-
   const t = getTranslation(language);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isPaused, setIsPaused] = useState(false);
@@ -56,7 +54,7 @@ export const TickerBar: React.FC<TickerBarProps> = ({ items, onSelectArticle, th
   }, [isPaused, isHovered, prefersReducedMotion, breakingItems.length]);
 
   return (
-    <div className="max-w-[1680px] w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+    <div className="w-full">
       <div className={`w-full overflow-hidden text-sm py-2 px-4 rounded-card border transition-all shadow-md flex items-center gap-3 ${
         theme === 'dark'
           ? 'bg-gradient-to-r from-amber-950/40 via-[#19150d] to-amber-950/40 border-amber-500/40 text-neutral-200'
@@ -83,7 +81,7 @@ export const TickerBar: React.FC<TickerBarProps> = ({ items, onSelectArticle, th
           ref={scrollRef}
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
-          className="flex-1 overflow-x-auto no-scrollbar stories-scroll-container whitespace-nowrap flex items-center gap-5 py-0.5 px-3"
+          className="min-w-0 flex-1 overflow-x-auto no-scrollbar stories-scroll-container whitespace-nowrap flex items-center gap-5 py-0.5 px-3"
           style={{
             maskImage: 'linear-gradient(to right, transparent 0%, black 20px, black calc(100% - 20px), transparent 100%)',
             WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 20px, black calc(100% - 20px), transparent 100%)',
@@ -92,6 +90,8 @@ export const TickerBar: React.FC<TickerBarProps> = ({ items, onSelectArticle, th
           {doubledItems.map((item, idx) => (
             <button
               key={`${item.id}-${idx}`}
+              aria-hidden={idx >= breakingItems.length || undefined}
+              tabIndex={idx >= breakingItems.length ? -1 : undefined}
               onClick={() => onSelectArticle(item)}
               onMouseEnter={() => setIsHovered(true)}
               onMouseLeave={() => setIsHovered(false)}

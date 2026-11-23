@@ -23,6 +23,8 @@ import { emptyStateFor } from './services/emptyState';
 
 /** Stories requested per page from the CyberKiwi server (the server caps this at 50). */
 const STORY_PAGE_SIZE = 50;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const OVERVIEW_NEWS_LIMIT = 6;
 
 interface BlockStoryPage {
   reader: string;
@@ -941,6 +943,7 @@ export default function App() {
 
   // Filter items per Dynamic Block
   const getBlockNewsItems = useCallback((block: DynamicBlock): NewsItem[] => {
+    const cutoff = block.id === 'breaking-vulns' ? Date.now() - ONE_DAY_MS : null;
     // Server mode: the block shows the stories its own query returned. Archive and search still apply.
     if (apiClient && serverStories !== null) {
       const page = blockStories[block.id];
@@ -948,12 +951,13 @@ export default function App() {
       const q = debouncedSearchQuery.trim().toLowerCase();
       const articles = stories
         .flatMap((s) => s.articles)
+        .filter((it) => cutoff === null || it.timestamp >= cutoff)
         .filter((it) => (showArchiveOnly ? archivedArticleIds.has(it.id) : !archivedArticleIds.has(it.id)))
         .filter((it) => !q || it.title.toLowerCase().includes(q) || it.sourceName.toLowerCase().includes(q));
       return groupItemsByStory(articles, stories);
     }
 
-    let list = allNewsItems;
+    let list = cutoff === null ? allNewsItems : allNewsItems.filter((it) => it.timestamp >= cutoff);
 
     // Archive / Active filter:
     // If showArchiveOnly is true, show ONLY archived/clicked items.
@@ -1327,6 +1331,18 @@ export default function App() {
       ? page : undefined;
     return { block, items: topicPage ? items : items.slice(0, block.itemCount), nextCursor: topicPage?.nextCursor };
   }).filter(({ items }) => !isOverview || items.length > 0);
+  const overviewNews = isOverview ? displayedBlocks.find(({ block }) => block.categoryFilter === 'news') : undefined;
+  const orderedBlocks = overviewNews
+    ? [overviewNews, ...displayedBlocks.filter((entry) => entry !== overviewNews)]
+    : displayedBlocks;
+  const breakingCutoff = Date.now() - ONE_DAY_MS;
+  const breakingHeadlines = isOverview && readGate !== 'signed_out'
+    ? [...new Map(
+      [...allNewsItems, ...(overviewNews?.items ?? [])].map((item) => [item.id, item]),
+    ).values()]
+      .filter((item) => item.timestamp >= breakingCutoff && !archivedArticleIds.has(item.id) && checkIsBreaking(item))
+      .sort((a, b) => b.timestamp - a.timestamp)
+    : [];
   const visibleStoryCount = displayedBlocks.reduce((sum, { items }) => sum + items.length, 0);
 
   const handleSelectCategory = (cat: string) => {
@@ -1402,15 +1418,6 @@ export default function App() {
         newArticlesCount={0}
         selectedCategory={selectedCategory}
         onSelectCategory={handleSelectCategory}
-      />
-
-      {/* Breaking News Ticker Bar */}
-      <TickerBar
-        items={allNewsItems}
-        onSelectArticle={handleSelectArticle}
-        theme={settings.theme}
-        accentColor={settings.accentColor}
-        language={settings.language}
       />
 
       {/* Pull to Refresh Mobile Indicator */}
@@ -1576,34 +1583,48 @@ export default function App() {
                 ? 'lg:grid-cols-2'
                 : 'lg:grid-cols-3'
             } gap-6`}>
-            {displayedBlocks.map(({ block, items, nextCursor }) => (
-              <DynamicBlockCard
-                key={block.id}
-                block={block}
-                focused={focusedTopic}
-                items={items}
-                onLoadMore={nextCursor ? () => void loadMoreBlockStories(block) : undefined}
-                isLoadingMore={loadingMoreBlockId !== null}
-                emptyKey={emptyKeyForBlock(block)}
-                isLoading={isRefreshing}
-                onRefreshBlock={fetchAllFeeds}
-                onSelectArticle={handleSelectArticle}
-                onToggleBookmark={toggleBookmark}
-                onEditBlock={() => {
-                  setEditingBlock(block);
-                  setIsCreateBlockOpen(true);
-                }}
-                onDeleteBlock={() => handleDeleteBlock(block.id)}
-                onUpdateBlockLayout={(layout) => handleUpdateBlockLayout(block.id, layout)}
-                onGenerateAISummary={() => handleGenerateAISummaryForBlock(block)}
-                isGeneratingAI={generatingAiBlockId === block.id}
-                theme={settings.theme}
-                accentColor={settings.accentColor}
-                bookmarkedIds={bookmarkedIds}
-                archivedIds={archivedArticleIds}
-                onToggleArchive={handleToggleArchiveItem}
-                language={settings.language}
-              />
+            {breakingHeadlines.length > 0 && (
+              <div className="col-span-full min-w-0">
+                <TickerBar
+                  items={breakingHeadlines}
+                  onSelectArticle={handleSelectArticle}
+                  theme={settings.theme}
+                  accentColor={settings.accentColor}
+                  language={settings.language}
+                />
+              </div>
+            )}
+            {orderedBlocks.map(({ block, items, nextCursor }) => (
+              <div key={block.id} className={block.id === overviewNews?.block.id ? 'col-span-full min-w-0' : 'min-w-0'}>
+                <DynamicBlockCard
+                  block={block}
+                  focused={focusedTopic || block.id === overviewNews?.block.id}
+                  items={block.id === overviewNews?.block.id
+                    ? [...items].sort((a, b) => b.timestamp - a.timestamp).slice(0, OVERVIEW_NEWS_LIMIT)
+                    : items}
+                  onLoadMore={nextCursor ? () => void loadMoreBlockStories(block) : undefined}
+                  isLoadingMore={loadingMoreBlockId !== null}
+                  emptyKey={emptyKeyForBlock(block)}
+                  isLoading={isRefreshing}
+                  onRefreshBlock={fetchAllFeeds}
+                  onSelectArticle={handleSelectArticle}
+                  onToggleBookmark={toggleBookmark}
+                  onEditBlock={() => {
+                    setEditingBlock(block);
+                    setIsCreateBlockOpen(true);
+                  }}
+                  onDeleteBlock={() => handleDeleteBlock(block.id)}
+                  onUpdateBlockLayout={(layout) => handleUpdateBlockLayout(block.id, layout)}
+                  onGenerateAISummary={() => handleGenerateAISummaryForBlock(block)}
+                  isGeneratingAI={generatingAiBlockId === block.id}
+                  theme={settings.theme}
+                  accentColor={settings.accentColor}
+                  bookmarkedIds={bookmarkedIds}
+                  archivedIds={archivedArticleIds}
+                  onToggleArchive={handleToggleArchiveItem}
+                  language={settings.language}
+                />
+              </div>
             ))}
           </div>
         ) : null}
